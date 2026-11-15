@@ -9,7 +9,12 @@ One note at a time, in a small range that widens as you improve.
 1. **Home note.** On first run you sing any comfortable note; practice starts there.
 2. **Find it.** The note plays (and replays whenever you go quiet). Sing and steer — the panel fades from red through amber to green. Hold green for 1.2 s. This is the only step where sliding is allowed.
 3. **Land it.** Hear the note, then sing one short note cold. Green = landed, amber = right pitch but you scooped or wobbled, red = flat/sharp. The colour only appears after the note, so you can't steer into it.
-4. Three clean landings in a row (or 4 of 5) make a note solid and unlock the next one — nearest to home, alternating above and below. Solid notes keep returning as mixed review; miss one twice and it's back in focus. Miss a new note three times running and you go back to finding it.
+4. A streak of clean landings (5 by default; 3–20 in Settings) makes a note solid and unlocks the next one — nearest to home, alternating above and below. Miss a new note three times running and you go back to finding it.
+5. **Retention.** A streak right after hearing a note mostly proves short-term echo memory, so solid notes have to survive time: each one is checked cold at the start of every new day, and keeps returning as mixed review. Miss one twice and it's back in focus.
+
+**Silence before you sing** (Settings → Memory, both modes) adds a 2–8 s silent gap after the reference, to train holding a pitch in your head.
+
+Short sessions spread through the day work better than one long one.
 
 ## Test mode
 

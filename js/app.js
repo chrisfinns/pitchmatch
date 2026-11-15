@@ -134,13 +134,19 @@ function playReference(withContext) {
     say(`Key of ${keyLabel(round.key)}`, 'Hear the key. The note to match comes next.');
     after((at - engine.now()) * 1000, () => say('Match this note', 'Wait for it to finish, then sing it back.'));
   } else {
-    const lead = { find: 'Then sing, and steer until the panel goes green.', land: 'Hear it in your head first. Then land on it.' }[round.kind];
+    const lead = round.cold
+      ? 'Cold check — a note you locked in on an earlier day.'
+      : { find: 'Then sing, and steer until the panel goes green.', land: 'Hear it in your head first. Then land on it.' }[round.kind];
     say(round.tryNo === 1 ? 'Listen…' : 'Listen again…', lead || 'Wait for the note to finish, then sing it back.');
   }
 
   engine.playNote(round.midi, { at, dur: NOTE_DUR, vel: 0.85, timbre });
-  // Listening opens as the note releases; the tracker itself waits for real silence.
-  after((at + NOTE_DUR - engine.now()) * 1000 + 60, listen);
+  // Listening opens as the note releases (or after a silent gap, to train holding
+  // the pitch in memory); the tracker itself waits for real silence.
+  const endMs = (at + NOTE_DUR - engine.now()) * 1000 + 60;
+  const gap = round.kind === 'find' ? 0 : settings.gap;
+  if (gap > 0) after(endMs, () => say('Hold it in your head', `Stay silent for ${gap} s and keep the note alive in your mind. Then sing.`));
+  after(endMs + gap * 1000, listen);
   renderScope();
 }
 
@@ -319,9 +325,11 @@ function startPractice(home, note) {
   after(2400, practiceRound);
 }
 
+const today = () => new Date().toLocaleDateString('en-CA'); // local YYYY-MM-DD
+
 function practiceRound() {
-  const pick = pickPractice(practice, round ? round.midi : null);
-  round = { kind: pick.stage, review: pick.review, midi: pick.midi, freq: midiToFreq(pick.midi), tryNo: 1 };
+  const pick = pickPractice(practice, round ? round.midi : null, Math.random, today());
+  round = { kind: pick.stage, review: pick.review, cold: !!pick.cold, midi: pick.midi, freq: midiToFreq(pick.midi), tryNo: 1 };
   lampSet('');
   playReference(false);
 }
@@ -385,7 +393,7 @@ function judgeLand(ev) {
     octave: 'wrong octave',
   }[res.verdict];
 
-  const out = recordLand(practice, round.midi, res.ok, settings.low, settings.high);
+  const out = recordLand(practice, round.midi, res.ok, { low: settings.low, high: settings.high, need: settings.landStreak, today: today() });
   store.savePractice(practice);
   cleanStreak = res.ok ? cleanStreak + 1 : 0;
 
@@ -398,7 +406,11 @@ function judgeLand(ev) {
       complete: () => `${name} is solid — that's your whole range. From here it's mixed review; widen the range in Settings when it gets easy.`,
       demoted: () => `${name} has slipped, so it's back in focus.`,
       refind: () => `Let's find ${name} again with the live colour.`,
-    }[out.event] || (() => `${name}: ${n.recent.filter(Boolean).length} of last ${n.recent.length} clean.`);
+    }[out.event] ||
+    (() => {
+      if (n.stage === 'land') return `${name}: ${n.streak} of ${settings.landStreak} in a row.`;
+      return res.ok ? `${name} still holds.` : `${name}: one more miss and it's back in focus.`;
+    });
 
   setState(S.DONE);
   lampSet(tone, word);
@@ -477,7 +489,7 @@ function renderControls() {
   let badge = 'Ready';
   if (round && round.kind === 'test') badge = `Try ${round.tryNo} · ${round.tryNo === 1 ? 'blind' : 'analyzer'}`;
   else if (round && round.kind === 'calibrate') badge = 'Home note';
-  else if (round) badge = `${noteName(round.midi)} · ${round.kind === 'find' ? 'find it' : round.review ? 'review' : 'land it'}`;
+  else if (round) badge = `${noteName(round.midi)} · ${round.kind === 'find' ? 'find it' : round.cold ? 'cold check' : round.review ? 'review' : 'land it'}`;
   $('tryBadge').textContent = badge;
   const key = $('keyBadge');
   key.hidden = !(round && round.key);
@@ -573,7 +585,7 @@ function renderPractice() {
   const focus = learning(practice);
   const chip = (m) => {
     const n = practice.notes[m];
-    const label = { find: 'find', land: 'land', mastered: 'solid' }[n.stage];
+    const label = { find: 'find', land: `land ${n.streak || 0}/${settings.landStreak}`, mastered: 'solid' }[n.stage];
     const dots = n.recent.map((ok) => (ok ? '●' : '○')).join('');
     return `<span class="pnote ${n.stage}${m === focus ? ' focus' : ''}${m === practice.home ? ' home' : ''}"><b>${noteName(m)}</b><i>${label}</i><em>${dots}</em></span>`;
   };
@@ -644,6 +656,8 @@ const FIELDS = [
   ['setHold', 'hold'],
   ['setScoop', 'scoopThr'],
   ['setStrict', 'strictOnset'],
+  ['setStreak', 'landStreak'],
+  ['setGap', 'gap'],
   ['setKeyMode', 'keyMode'],
   ['setKeyTonic', 'keyTonic'],
   ['setKeyScale', 'keyScale'],

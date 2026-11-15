@@ -2,15 +2,19 @@
 //
 // Practice starts on one "home" note and widens outward a semitone at a time.
 // Each note climbs: FIND (live colour, steering allowed, just to locate it)
-// → LAND (hear it, then hit it cold; only a clean onset counts) → MASTERED.
-// Mastered notes keep coming back as mixed review; slip twice and they return
-// to LAND. Only one note is in focus at a time.
+// → LAND (hear it, then hit it cold; only a clean onset counts) → MASTERED,
+// after `need` clean landings in a row.
+//
+// A streak right after hearing the note mostly proves short-term echo memory,
+// so mastery has to survive time: every mastered note is re-checked cold on
+// each new day before anything else, and keeps returning as mixed review.
+// Slip twice and it goes back to LAND. Only one note is in focus at a time.
 
-const WINDOW = 5; // landings remembered per note
+const WINDOW = 5; // recent landings remembered per note (for display and review weighting)
 const REVIEW_SHARE = 1 / 3; // how often a mastered note interrupts the focus note
 const MISSES_TO_REFIND = 3;
 
-const fresh = () => ({ stage: 'find', recent: [], reps: 0, clean: 0, misses: 0 });
+const fresh = () => ({ stage: 'find', recent: [], reps: 0, clean: 0, misses: 0, streak: 0, day: null });
 
 export function createPractice(home) {
   return { v: 1, home, order: [home], notes: { [home]: fresh() } };
@@ -41,10 +45,19 @@ function weighted(pool, p, rnd) {
   return pool[pool.length - 1];
 }
 
-/** What to practise next: { midi, stage: 'find' | 'land', review }. */
-export function pickPractice(p, prev = null, rnd = Math.random) {
+/**
+ * What to practise next: { midi, stage: 'find' | 'land', review, cold? }.
+ * `today` is any string that changes daily; with it, notes mastered on an
+ * earlier day are checked cold first.
+ */
+export function pickPractice(p, prev = null, rnd = Math.random, today = null) {
   const focus = learning(p);
   const mastered = p.order.filter((m) => p.notes[m].stage === 'mastered');
+  if (today) {
+    let due = mastered.filter((m) => p.notes[m].day !== today);
+    if (due.length > 1) due = due.filter((m) => m !== prev);
+    if (due.length) return { midi: due[Math.floor(rnd() * due.length)], stage: 'land', review: true, cold: true };
+  }
   if (focus !== null) {
     if (p.notes[focus].stage === 'find') return { midi: focus, stage: 'find', review: false };
     const pool = mastered.filter((m) => m !== prev);
@@ -63,20 +76,22 @@ export function recordFind(p, midi) {
 }
 
 /**
- * One landing attempt. Returns { event, midi? } where event is
+ * One landing attempt. opts: { low, high, need, today } — `need` clean landings
+ * in a row master a note. Returns { event, midi? } where event is
  * unlocked | mastered | complete | demoted | refind | null.
  */
-export function recordLand(p, midi, clean, low, high) {
+export function recordLand(p, midi, clean, { low, high, need = 3, today = null }) {
   const n = p.notes[midi];
   n.reps++;
   if (clean) n.clean++;
+  n.streak = clean ? (n.streak || 0) + 1 : 0;
   n.misses = clean ? 0 : n.misses + 1;
+  n.day = today;
   n.recent.push(clean ? 1 : 0);
   if (n.recent.length > WINDOW) n.recent.shift();
 
   if (n.stage === 'land') {
-    const streak = n.recent.length >= 3 && n.recent.slice(-3).every(Boolean);
-    if (streak || (n.recent.length >= WINDOW && hits(n) >= WINDOW - 1)) {
+    if (n.streak >= need) {
       n.stage = 'mastered';
       if (learning(p) !== null) return { event: 'mastered' };
       const next = nextUnlock(p, low, high);
@@ -86,11 +101,11 @@ export function recordLand(p, midi, clean, low, high) {
       return { event: 'unlocked', midi: next };
     }
     if (n.misses >= MISSES_TO_REFIND) {
-      Object.assign(n, { stage: 'find', recent: [], misses: 0 });
+      Object.assign(n, { stage: 'find', recent: [], misses: 0, streak: 0 });
       return { event: 'refind' };
     }
   } else if (n.stage === 'mastered' && n.misses >= 2) {
-    Object.assign(n, { stage: 'land', recent: [], misses: 0 });
+    Object.assign(n, { stage: 'land', recent: [], misses: 0, streak: 0 });
     return { event: 'demoted' };
   }
   return { event: null };

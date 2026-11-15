@@ -192,7 +192,7 @@ test('keyContext only uses notes of the key (plus the leading tone in minor)', (
 
 import { createPractice, pickPractice, recordFind, recordLand, learning, nextUnlock } from '../js/practice.js';
 
-const land = (p, midi, results, low = 43, high = 64) => results.map((ok) => recordLand(p, midi, ok, low, high).event);
+const land = (p, midi, results, opts = {}) => results.map((ok) => recordLand(p, midi, ok, { low: 43, high: 64, ...opts }).event);
 
 test('practice: a new note is found first, then landed', () => {
   const p = createPractice(50);
@@ -207,19 +207,35 @@ test('practice: three clean landings in a row unlock the next note, outward from
   for (let i = 0; i < 4; i++) {
     const focus = learning(p);
     recordFind(p, focus);
-    const out = recordLand(p, focus, true, 43, 64);
-    assert.equal(out.event, null);
-    recordLand(p, focus, true, 43, 64);
-    unlocked.push(recordLand(p, focus, true, 43, 64).midi);
+    assert.deepEqual(land(p, focus, [true, true]), [null, null]);
+    unlocked.push(recordLand(p, focus, true, { low: 43, high: 64 }).midi);
   }
   assert.deepEqual(unlocked, [51, 49, 52, 48]);
 });
 
-test('practice: four of five also passes; misses hold a note back', () => {
+test('practice: the streak needed is configurable and a miss resets it', () => {
   const p = createPractice(50);
   recordFind(p, 50);
-  assert.deepEqual(land(p, 50, [true, false, true, true, false, true]), [null, null, null, null, null, null]);
-  assert.equal(recordLand(p, 50, true, 43, 64).event, 'unlocked'); // last five: 1 1 0 1 1
+  const need = { need: 5 };
+  assert.deepEqual(land(p, 50, [true, true, true, true, false, true, true, true, true], need), Array(9).fill(null));
+  assert.equal(p.notes[50].streak, 4);
+  assert.deepEqual(land(p, 50, [true], need), ['unlocked']);
+});
+
+test('practice: notes mastered on an earlier day are checked cold first', () => {
+  const p = createPractice(50);
+  recordFind(p, 50);
+  land(p, 50, [true, true, true], { today: 'mon' }); // 50 mastered, 51 unlocked
+  recordFind(p, 51);
+  land(p, 51, [true, true, true], { today: 'mon' }); // 51 mastered, 49 unlocked
+  assert.ok(!pickPractice(p, null, () => 0.99, 'mon').cold); // same day: straight to the focus note
+  const first = pickPractice(p, null, Math.random, 'tue');
+  assert.ok(first.cold && first.review && [50, 51].includes(first.midi));
+  land(p, first.midi, [true], { today: 'tue' });
+  const second = pickPractice(p, first.midi, Math.random, 'tue');
+  assert.ok(second.cold && second.midi !== first.midi);
+  land(p, second.midi, [false], { today: 'tue' }); // a cold miss still counts as checked
+  assert.deepEqual(pickPractice(p, second.midi, () => 0.99, 'tue'), { midi: 49, stage: 'find', review: false });
 });
 
 test('practice: three misses in a row send a note back to find', () => {
@@ -233,9 +249,9 @@ test('practice: unlocking respects the range and finishes when it is full', () =
   const p = createPractice(50);
   assert.equal(nextUnlock(p, 50, 51), 51);
   recordFind(p, 50);
-  assert.equal(land(p, 50, [true, true, true], 50, 51).pop(), 'unlocked');
+  assert.equal(land(p, 50, [true, true, true], { low: 50, high: 51 }).pop(), 'unlocked');
   recordFind(p, 51);
-  assert.equal(land(p, 51, [true, true, true], 50, 51).pop(), 'complete');
+  assert.equal(land(p, 51, [true, true, true], { low: 50, high: 51 }).pop(), 'complete');
   assert.equal(learning(p), null);
   for (let i = 0, prev = null; i < 50; i++) {
     const pick = pickPractice(p, prev);

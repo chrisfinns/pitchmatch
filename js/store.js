@@ -17,6 +17,8 @@ export const DEFAULTS = {
   hold: 1, // seconds the note is judged over
   scoopThr: 30, // cents off at the onset that count as a scoop
   strictOnset: true, // scoops are misses
+  landStreak: 5, // practice: clean landings in a row that lock a note in
+  gap: 0, // seconds of silence between the reference and singing
   keyMode: false,
   keyTonic: 'random',
   keyScale: 'major',
