@@ -4,9 +4,11 @@ import { NOTE_NAMES, pc, noteName, degreeLabel } from './music.js';
 
 const KEY_SETTINGS = 'pitchmatch.settings.v1';
 const KEY_LOG = 'pitchmatch.log.v1';
+const KEY_PRACTICE = 'pitchmatch.practice.v1';
 const MAX_LOG = 3000;
 
 export const DEFAULTS = {
+  mode: 'practice', // practice | test
   rangePreset: 'baritone',
   low: 43,
   high: 64,
@@ -43,6 +45,11 @@ export const loadSettings = () => ({ ...DEFAULTS, ...(read(KEY_SETTINGS) || {}) 
 export const saveSettings = (s) => write(KEY_SETTINGS, s);
 export const loadLog = () => (Array.isArray(read(KEY_LOG)) ? read(KEY_LOG) : []);
 export const saveLog = (log) => write(KEY_LOG, log.slice(-MAX_LOG));
+export function loadPractice() {
+  const p = read(KEY_PRACTICE);
+  return p && p.v === 1 && p.notes && Array.isArray(p.order) ? p : null;
+}
+export const savePractice = (p) => write(KEY_PRACTICE, p);
 
 /**
  * A record: { ts, midi, key: {tonic, scale}|null, degree, result: first|second|miss,

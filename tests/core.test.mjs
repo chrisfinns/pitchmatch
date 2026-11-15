@@ -187,3 +187,77 @@ test('keyContext only uses notes of the key (plus the leading tone in minor)', (
     }
   }
 });
+
+// ---- practice ladder -----------------------------------------------------
+
+import { createPractice, pickPractice, recordFind, recordLand, learning, nextUnlock } from '../js/practice.js';
+
+const land = (p, midi, results, low = 43, high = 64) => results.map((ok) => recordLand(p, midi, ok, low, high).event);
+
+test('practice: a new note is found first, then landed', () => {
+  const p = createPractice(50);
+  assert.deepEqual(pickPractice(p), { midi: 50, stage: 'find', review: false });
+  recordFind(p, 50);
+  assert.deepEqual(pickPractice(p), { midi: 50, stage: 'land', review: false });
+});
+
+test('practice: three clean landings in a row unlock the next note, outward from home', () => {
+  const p = createPractice(50);
+  const unlocked = [];
+  for (let i = 0; i < 4; i++) {
+    const focus = learning(p);
+    recordFind(p, focus);
+    const out = recordLand(p, focus, true, 43, 64);
+    assert.equal(out.event, null);
+    recordLand(p, focus, true, 43, 64);
+    unlocked.push(recordLand(p, focus, true, 43, 64).midi);
+  }
+  assert.deepEqual(unlocked, [51, 49, 52, 48]);
+});
+
+test('practice: four of five also passes; misses hold a note back', () => {
+  const p = createPractice(50);
+  recordFind(p, 50);
+  assert.deepEqual(land(p, 50, [true, false, true, true, false, true]), [null, null, null, null, null, null]);
+  assert.equal(recordLand(p, 50, true, 43, 64).event, 'unlocked'); // last five: 1 1 0 1 1
+});
+
+test('practice: three misses in a row send a note back to find', () => {
+  const p = createPractice(50);
+  recordFind(p, 50);
+  assert.deepEqual(land(p, 50, [false, false, false]), [null, null, 'refind']);
+  assert.equal(pickPractice(p).stage, 'find');
+});
+
+test('practice: unlocking respects the range and finishes when it is full', () => {
+  const p = createPractice(50);
+  assert.equal(nextUnlock(p, 50, 51), 51);
+  recordFind(p, 50);
+  assert.equal(land(p, 50, [true, true, true], 50, 51).pop(), 'unlocked');
+  recordFind(p, 51);
+  assert.equal(land(p, 51, [true, true, true], 50, 51).pop(), 'complete');
+  assert.equal(learning(p), null);
+  for (let i = 0, prev = null; i < 50; i++) {
+    const pick = pickPractice(p, prev);
+    assert.ok(pick.review && pick.stage === 'land' && pick.midi !== prev);
+    prev = pick.midi;
+  }
+});
+
+test('practice: mastered notes return as review and are demoted after two misses', () => {
+  const p = createPractice(50);
+  recordFind(p, 50);
+  land(p, 50, [true, true, true]); // unlocks 51
+  recordFind(p, 51);
+  let reviews = 0;
+  for (let i = 0; i < 300; i++) {
+    const pick = pickPractice(p, 51);
+    if (pick.review) {
+      assert.equal(pick.midi, 50);
+      reviews++;
+    } else assert.equal(pick.midi, 51);
+  }
+  assert.ok(reviews > 60 && reviews < 140, `review share ${reviews}/300`);
+  assert.deepEqual(land(p, 50, [false, false]), [null, 'demoted']);
+  assert.equal(learning(p), 50); // the slipped note takes focus again
+});

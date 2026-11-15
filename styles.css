@@ -55,7 +55,37 @@ h1, h2, p { margin: 0; }
 }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 
+body[data-mode="practice"] .only-test,
+body[data-mode="test"] .only-practice { display: none; }
+
 /* ---- stage ---- */
+.modes { margin-bottom: 14px; }
+.modes button { flex: 1; padding: 8px 10px; font-size: 13px; min-height: 36px; }
+
+/* The practice "lamp": nothing to read, just a colour. */
+.lamp {
+  height: 240px; border: 1px solid var(--line); border-radius: 10px; background-color: #0f1319;
+  display: grid; place-items: center; transition: background-color 0.18s linear;
+  font: 600 15px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255, 255, 255, 0.94);
+}
+.lamp[data-tone="good"] { background-color: #1c8f63; }
+.lamp[data-tone="warn"] { background-color: #b5851c; }
+.lamp[data-tone="bad"] { background-color: #b23c3c; }
+
+.practice-sum { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+.practice-sum b { color: var(--text); font-family: var(--mono); }
+.ladder { display: flex; flex-wrap: wrap; gap: 8px; }
+.pnote {
+  display: grid; gap: 2px; min-width: 64px; padding: 8px 10px; border-radius: 10px;
+  background: var(--panel-2); border: 1px solid transparent;
+}
+.pnote b { font-size: 15px; }
+.pnote i { font: normal 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.pnote em { font: normal 9px var(--mono); letter-spacing: 2px; color: var(--muted); min-height: 12px; }
+.pnote.mastered i { color: var(--good); }
+.pnote.focus { border-color: var(--info); }
+.pnote.focus i { color: var(--info); }
+.pnote.home b::after { content: " ⌂"; color: var(--muted); font-weight: 400; }
 .stage-top { display: flex; align-items: center; gap: 8px; min-height: 26px; }
 .spacer { flex: 1; }
 .badge {
@@ -186,6 +216,7 @@ a { color: var(--info); }
   .app { padding: 12px 12px 32px; }
   .chip:nth-child(2) { display: none; }
   #scope { height: 190px; }
+  .lamp { height: 210px; }
   .hint kbd, .hint { font-size: 11px; }
   .controls .btn { flex: 1 1 0; padding: 10px 8px; }
   .controls .btn.primary { flex-basis: 100%; }

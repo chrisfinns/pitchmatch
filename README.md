@@ -2,6 +2,17 @@
 
 Sing-back ear training. The app plays a note; you sing it back; it tells you exactly where you landed.
 
+## Practice mode
+
+One note at a time, in a small range that widens as you improve.
+
+1. **Home note.** On first run you sing any comfortable note; practice starts there.
+2. **Find it.** The note plays (and replays whenever you go quiet). Sing and steer — the panel fades from red through amber to green. Hold green for 1.2 s. This is the only step where sliding is allowed.
+3. **Land it.** Hear the note, then sing one short note cold. Green = landed, amber = right pitch but you scooped or wobbled, red = flat/sharp. The colour only appears after the note, so you can't steer into it.
+4. Three clean landings in a row (or 4 of 5) make a note solid and unlock the next one — nearest to home, alternating above and below. Solid notes keep returning as mixed review; miss one twice and it's back in focus. Miss a new note three times running and you go back to finding it.
+
+## Test mode
+
 - **Try 1 is blind.** No visual — just your ear. Miss it and the note replays for **try 2 with a live pitch analyzer**.
 - **Scoop detection.** The first 250 ms of your note is judged separately from the sustain. Slide up (or down) into the pitch and it's a miss, even if you settle dead on.
 - **Tight scoring.** Default window is ±25¢ held steady for 1 s; go down to ±10¢ in Settings.

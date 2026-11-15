@@ -1,19 +1,25 @@
 // PitchMatch — round flow and UI.
 //
-// A round: play the reference → try 1 (blind) → if missed, replay and try 2
-// with the live analyzer → log it.
+// Test: play the reference → try 1 (blind) → if missed, replay and try 2 with
+// the live analyzer → log it.
+// Practice: one note at a time — find it (live colour), then land on it cold;
+// the set of notes widens as each one is mastered (see practice.js).
 
 import { AudioEngine } from './audio.js';
 import { NoteTracker } from './capture.js';
 import { evaluateAttempt, describe } from './evaluate.js';
 import { RANGES, NOTE_NAMES, midiToFreq, noteName, pickRound, keyContext, keyLabel, degreeLabel } from './music.js';
+import { createPractice, pickPractice, recordFind, recordLand, learning } from './practice.js';
 import { Scope } from './scope.js';
 import * as store from './store.js';
 
 const $ = (id) => document.getElementById(id);
-const S = Object.freeze({ IDLE: 'idle', PLAYING: 'playing', LISTENING: 'listening', CAPTURING: 'capturing', BETWEEN: 'between', DONE: 'done' });
+const S = Object.freeze({ IDLE: 'idle', PLAYING: 'playing', LISTENING: 'listening', CAPTURING: 'capturing', FINDING: 'finding', BETWEEN: 'between', DONE: 'done' });
 const NOTE_DUR = 1.3;
 const LIVE_SPAN = 4;
+const LAND_HOLD = 0.75; // practice landings are short: it's the onset that matters
+const FIND_HOLD = 1.2; // seconds in the green that count as "found"
+const FIND_IDLE = 3.5; // seconds of silence before the note plays again
 
 const firstVisit = !store.hasSettings();
 const settings = store.loadSettings();
@@ -36,6 +42,10 @@ let lastFrame = null;
 let earlyVoice = 0;
 let statsScope = 'session';
 let meter = 0;
+let mode = settings.mode === 'test' ? 'test' : 'practice';
+let practice = store.loadPractice(); // null until a home note is set
+let find = null; // live state of a "find it" round
+let cleanStreak = 0;
 
 // ---------------------------------------------------------------- flow
 
@@ -73,7 +83,15 @@ async function start() {
   } finally {
     starting = false;
   }
-  newRound();
+  begin();
+}
+
+/** Start the next round of whichever mode is selected. */
+function begin() {
+  if (mode === 'test') return newRound();
+  scopeMode = 'idle';
+  if (practice) practiceRound();
+  else calibrate();
 }
 
 function stop() {
@@ -82,6 +100,7 @@ function stop() {
   lastFrame = null;
   scopeMode = 'idle';
   holdBar(false);
+  lampSet('');
   setState(S.IDLE);
   say('Stopped', 'Press Start when you want another go.');
   renderScope();
@@ -90,7 +109,7 @@ function stop() {
 function newRound() {
   const pick = pickRound(settings, round ? round.midi : null);
   if (forcedNote) Object.assign(pick, { midi: forcedNote, key: null, degree: null });
-  round = { ...pick, freq: midiToFreq(pick.midi), tryNo: 1, tries: [] };
+  round = { kind: 'test', ...pick, freq: midiToFreq(pick.midi), tryNo: 1, tries: [] };
   review = null;
   liveMark = null;
   livePts = [];
@@ -115,7 +134,8 @@ function playReference(withContext) {
     say(`Key of ${keyLabel(round.key)}`, 'Hear the key. The note to match comes next.');
     after((at - engine.now()) * 1000, () => say('Match this note', 'Wait for it to finish, then sing it back.'));
   } else {
-    say(round.tryNo === 1 ? 'Listen…' : 'Listen again…', 'Wait for the note to finish, then sing it back.');
+    const lead = { find: 'Then sing, and steer until the panel goes green.', land: 'Hear it in your head first. Then land on it.' }[round.kind];
+    say(round.tryNo === 1 ? 'Listen…' : 'Listen again…', lead || 'Wait for the note to finish, then sing it back.');
   }
 
   engine.playNote(round.midi, { at, dur: NOTE_DUR, vel: 0.85, timbre });
@@ -125,17 +145,21 @@ function playReference(withContext) {
 }
 
 function listen() {
-  tracker.hold = settings.hold;
+  if (round.kind === 'find') return listenFind();
+  tracker.hold = holdFor();
   tracker.reset();
   earlyVoice = 0;
   setState(S.LISTENING);
-  say('Sing it', singHint(), 'go');
+  say(...prompt(), 'go');
 }
 
-const singHint = () =>
-  round.tryNo === 1
-    ? 'Blind try. Land straight on the pitch and hold it steady.'
-    : 'Watch the analyzer. Hit the centre line from the very first instant.';
+const holdFor = () => (round.kind === 'test' ? settings.hold : round.kind === 'land' ? LAND_HOLD : 1);
+
+function prompt() {
+  if (round.kind === 'calibrate') return ['Sing any comfortable note', 'A relaxed “ah”, wherever your voice sits naturally. Hold it for a second — practice starts from there.'];
+  if (round.kind === 'land') return ['Sing it', 'One short, clean note. Be on it from the first instant — no sliding.'];
+  return ['Sing it', round.tryNo === 1 ? 'Blind try. Land straight on the pitch and hold it steady.' : 'Watch the analyzer. Hit the centre line from the very first instant.'];
+}
 
 function toCents(freq) {
   const c = 1200 * Math.log2(freq / round.freq);
@@ -150,6 +174,7 @@ function onFrame(f) {
     if (voiced) livePts.push({ t: f.t, c: toCents(f.freq) });
     while (livePts.length && f.t - livePts[0].t > LIVE_SPAN + 0.5) livePts.shift();
   }
+  if (state === S.FINDING) return findFrame(f, voiced);
   if (state !== S.LISTENING && state !== S.CAPTURING) return;
 
   // Singing before the room has gone quiet can't be judged — there's no clean onset.
@@ -163,24 +188,29 @@ function onFrame(f) {
   if (ev.type === 'onset') {
     setState(S.CAPTURING);
     say('Hold it…', '', 'go');
-    holdBar(true);
+    holdBar(true, holdFor());
   } else if (ev.type === 'short') {
     holdBar(false);
     setState(S.LISTENING);
-    say('Sing it', ev.dur > 0.15 ? `Too short — hold the note for ${settings.hold} s.` : singHint(), 'go');
+    const [title, hint] = prompt();
+    say(title, ev.dur > 0.15 ? `Too short — hold the note for ${holdFor()} s.` : hint, 'go');
   } else if (ev.type === 'done') {
     holdBar(false);
-    judge(ev);
+    if (ev.coverage < 0.75) return unreadable();
+    if (round.kind === 'calibrate') setHome(ev);
+    else if (round.kind === 'land') judgeLand(ev);
+    else judge(ev);
   }
+}
+
+function unreadable() {
+  setState(S.LISTENING);
+  say(prompt()[0], "Couldn't read that cleanly — sing a clear, steady “ah”.", 'go');
 }
 
 function judge(ev) {
   const res = evaluateAttempt(ev.frames, ev.t0, round.freq, settings);
-  if (!res.valid || ev.coverage < 0.75) {
-    setState(S.LISTENING);
-    say('Sing it', "Couldn't read that cleanly — sing a clear, steady “ah”.", 'go');
-    return;
-  }
+  if (!res.valid) return unreadable();
   round.tries.push({
     v: res.verdict,
     cents: Math.round(res.cents * 10) / 10,
@@ -238,7 +268,8 @@ function finish(result, res) {
 }
 
 function replay() {
-  if (state === S.LISTENING) playReference(false);
+  if (!round || !round.midi) return;
+  if (state === S.LISTENING || state === S.FINDING) playReference(false);
   else if (state === S.BETWEEN) secondTry();
   else if (state === S.DONE) {
     seq++; // holds auto-advance while you compare
@@ -249,13 +280,180 @@ function replay() {
 function mainAction() {
   if (state === S.IDLE) start();
   else if (state === S.BETWEEN) secondTry();
-  else if (state === S.DONE) newRound();
+  else if (state === S.DONE) begin();
 }
 
 function skip() {
   if (state === S.IDLE || !engine.running) return;
   engine.stopAll();
-  newRound();
+  if (round && round.kind === 'calibrate' && !practice) {
+    return startPractice(Math.round((settings.low + settings.high) / 2), 'Starting from the middle of your range.');
+  }
+  begin();
+}
+
+// ---------------------------------------------------------------- practice
+
+/** First run: the singer's own comfortable note becomes the starting point. */
+function calibrate() {
+  round = { kind: 'calibrate', tryNo: 1 };
+  lampSet('');
+  holdBar(false);
+  listen();
+}
+
+function setHome(ev) {
+  const freqs = ev.frames.map((f) => f.freq).sort((a, b) => a - b);
+  const sung = Math.round(69 + 12 * Math.log2(freqs[freqs.length >> 1] / 440));
+  const home = Math.max(settings.low, Math.min(settings.high, sung));
+  startPractice(home, sung === home ? `Your home note is ${noteName(home)}.` : `You sang ${noteName(sung)}, outside your range setting, so home is ${noteName(home)}.`);
+}
+
+function startPractice(home, note) {
+  practice = createPractice(home);
+  store.savePractice(practice);
+  setState(S.DONE);
+  lampSet('good', noteName(home));
+  say('Got it', `${note} Practice starts there and widens out one note at a time.`, 'good');
+  renderScore();
+  after(2400, practiceRound);
+}
+
+function practiceRound() {
+  const pick = pickPractice(practice, round ? round.midi : null);
+  round = { kind: pick.stage, review: pick.review, midi: pick.midi, freq: midiToFreq(pick.midi), tryNo: 1 };
+  lampSet('');
+  playReference(false);
+}
+
+// "Find it": the note loops whenever you go quiet; the panel shows how close you are.
+function listenFind() {
+  find = { wait: 0.3, c: null, green: 0, off: 0, gap: 0, idle: 0 };
+  setState(S.FINDING);
+  say('Find it', 'Sing, and steer until the panel turns green. Then hold it there.', 'go');
+}
+
+function findFrame(f, voiced) {
+  const dt = engine.frameDt;
+  if (find.wait > 0) {
+    find.wait -= dt; // let the reference die away in the room
+    return;
+  }
+  if (!voiced) {
+    find.gap += dt;
+    find.idle += dt;
+    if (find.gap > 0.15) Object.assign(find, { c: null, green: 0 });
+    if (find.idle > FIND_IDLE) playReference(false);
+    return;
+  }
+  find.gap = 0;
+  find.idle = 0;
+  const c = toCents(f.freq);
+  find.c = find.c === null ? c : find.c + (c - find.c) * 0.4;
+  if (Math.abs(c) <= settings.tol) {
+    find.green += dt;
+    find.off = 0;
+  } else if ((find.off += dt) > 0.08) {
+    find.green = 0;
+  }
+  if (find.green >= FIND_HOLD) found();
+}
+
+function found() {
+  recordFind(practice, round.midi);
+  store.savePractice(practice);
+  holdBar(false);
+  setState(S.DONE);
+  lampSet('good', 'found it');
+  say('Found it', `That's ${noteName(round.midi)}. Now land on it cold — no steering.`, 'good');
+  renderScore();
+  after(1800, practiceRound);
+}
+
+// "Land it": one short note, judged on where it starts as much as where it settles.
+function judgeLand(ev) {
+  const res = evaluateAttempt(ev.frames, ev.t0, round.freq, settings);
+  if (!res.valid) return unreadable();
+  const d = describe(res, round.midi);
+  const tone = res.ok ? 'good' : res.verdict === 'flat' || res.verdict === 'sharp' ? 'bad' : 'warn';
+  const word = {
+    hit: 'landed',
+    flat: 'under',
+    sharp: 'over',
+    scoop: res.scoop && res.scoop.dir === 'down' ? 'slid down' : 'scooped up',
+    unsteady: 'unsteady',
+    octave: 'wrong octave',
+  }[res.verdict];
+
+  const out = recordLand(practice, round.midi, res.ok, settings.low, settings.high);
+  store.savePractice(practice);
+  cleanStreak = res.ok ? cleanStreak + 1 : 0;
+
+  const name = noteName(round.midi);
+  const n = practice.notes[round.midi];
+  const tail =
+    {
+      unlocked: () => `${name} is solid. New note: ${noteName(out.midi)}.`,
+      mastered: () => `${name} is solid.`,
+      complete: () => `${name} is solid — that's your whole range. From here it's mixed review; widen the range in Settings when it gets easy.`,
+      demoted: () => `${name} has slipped, so it's back in focus.`,
+      refind: () => `Let's find ${name} again with the live colour.`,
+    }[out.event] || (() => `${name}: ${n.recent.filter(Boolean).length} of last ${n.recent.length} clean.`);
+
+  setState(S.DONE);
+  lampSet(tone, word);
+  say(d.title, `${d.detail} ${tail()}`, tone === 'warn' ? 'ok' : tone);
+  renderScore();
+  after(res.ok ? 1500 : 2800, practiceRound);
+}
+
+function lampSet(tone, text = '') {
+  const el = $('lamp');
+  el.style.backgroundColor = '';
+  el.dataset.tone = tone;
+  $('lampText').textContent = text;
+}
+
+/** Live colour while finding: green inside the window, through amber, to red far out. */
+function lampLive() {
+  const el = $('lamp');
+  const bar = $('holdBar');
+  bar.style.transition = 'none';
+  bar.style.width = `${Math.min(100, (find.green / FIND_HOLD) * 100)}%`;
+  if (find.c === null) {
+    el.style.backgroundColor = '';
+    $('lampText').textContent = '';
+    return;
+  }
+  const off = Math.abs(find.c);
+  const far = Math.max(0, Math.min(1, (off - settings.tol) / (settings.tol * 3)));
+  el.style.backgroundColor = `hsl(${Math.round(152 * (1 - far))} 62% ${Math.round(34 + 4 * far)}%)`;
+  $('lampText').textContent = off <= settings.tol ? 'hold' : find.c < 0 ? '▲ higher' : '▼ lower';
+}
+
+function setMode(next) {
+  if (next === mode) return;
+  mode = next;
+  settings.mode = next;
+  store.saveSettings(settings);
+  renderMode();
+  if (state === S.IDLE || !engine.running) return;
+  engine.stopAll();
+  holdBar(false);
+  round = null;
+  begin();
+}
+
+function renderMode() {
+  document.body.dataset.mode = mode;
+  $('modePractice').setAttribute('aria-selected', String(mode === 'practice'));
+  $('modeTest').setAttribute('aria-selected', String(mode === 'test'));
+  if (state === S.IDLE) {
+    if (mode === 'practice') say('Find the note. Then land on it.', 'One note at a time, starting where your voice sits. The range widens as you nail each one.');
+    else say('Hear a note. Sing it back.', 'Your first try is blind. Miss it, and the pitch analyzer switches on for a second try.');
+  }
+  renderScope();
+  renderScore();
 }
 
 function micError(err) {
@@ -270,13 +468,17 @@ function micError(err) {
 function renderControls() {
   document.body.dataset.state = state;
   const main = $('btnMain');
-  main.textContent = { idle: 'Start', playing: 'Playing…', listening: 'Listening…', capturing: 'Listening…', between: 'Try again', done: 'Next note' }[state];
+  main.textContent = { idle: 'Start', playing: 'Playing…', listening: 'Listening…', capturing: 'Listening…', finding: 'Listening…', between: 'Try again', done: 'Next note' }[state];
   main.disabled = ![S.IDLE, S.BETWEEN, S.DONE].includes(state);
-  $('btnReplay').disabled = ![S.LISTENING, S.BETWEEN, S.DONE].includes(state);
+  $('btnReplay').disabled = !(round && round.midi && [S.LISTENING, S.FINDING, S.BETWEEN, S.DONE].includes(state));
   $('btnSkip').disabled = state === S.IDLE;
   $('btnStop').disabled = state === S.IDLE;
 
-  $('tryBadge').textContent = round ? `Try ${round.tryNo} · ${round.tryNo === 1 ? 'blind' : 'analyzer'}` : 'Ready';
+  let badge = 'Ready';
+  if (round && round.kind === 'test') badge = `Try ${round.tryNo} · ${round.tryNo === 1 ? 'blind' : 'analyzer'}`;
+  else if (round && round.kind === 'calibrate') badge = 'Home note';
+  else if (round) badge = `${noteName(round.midi)} · ${round.kind === 'find' ? 'find it' : round.review ? 'review' : 'land it'}`;
+  $('tryBadge').textContent = badge;
   const key = $('keyBadge');
   key.hidden = !(round && round.key);
   if (round && round.key) key.textContent = keyLabel(round.key);
@@ -304,13 +506,13 @@ function readout(cents, word = '') {
   $('readout').dataset.tone = c === null ? '' : off <= settings.tol ? 'good' : off <= settings.tol * 2 ? 'warn' : 'bad';
 }
 
-function holdBar(on) {
+function holdBar(on, secs = 1) {
   const bar = $('holdBar');
   bar.style.transition = 'none';
   bar.style.width = '0';
   if (!on) return;
   void bar.offsetWidth;
-  bar.style.transition = `width ${settings.hold}s linear`;
+  bar.style.transition = `width ${secs}s linear`;
   bar.style.width = '100%';
 }
 
@@ -320,6 +522,7 @@ function tick() {
   meter += (Math.max(0, Math.min(1, (db + 60) / 50)) - meter) * 0.3;
   $('meterFill').style.width = `${(meter * 100).toFixed(1)}%`;
 
+  if (state === S.FINDING) lampLive();
   if (scopeMode !== 'live' || !lastFrame) return;
   scope.drawLive(livePts, lastFrame.t, settings.tol, liveMark, LIVE_SPAN);
   const head = livePts[livePts.length - 1];
@@ -332,8 +535,17 @@ const centsText = (c) => (c === null ? '–' : `${Math.round(c)}¢`);
 function renderScore() {
   const session = log.filter((r) => r.ts >= sessionStart);
   const now = store.summarize(session);
-  $('chipPct').textContent = pctText(now.pct);
-  $('chipStreak').textContent = now.streak;
+  if (mode === 'practice') {
+    const solid = practice ? practice.order.filter((m) => practice.notes[m].stage === 'mastered').length : 0;
+    $('chipA').textContent = solid;
+    $('chipALabel').textContent = solid === 1 ? 'note solid' : 'notes solid';
+    $('chipB').textContent = cleanStreak;
+  } else {
+    $('chipA').textContent = pctText(now.pct);
+    $('chipALabel').textContent = 'first try';
+    $('chipB').textContent = now.streak;
+  }
+  renderPractice();
 
   const recs = statsScope === 'session' ? session : log;
   const s = statsScope === 'session' ? now : store.summarize(log);
@@ -349,6 +561,24 @@ function renderScore() {
 
   renderNoteLog(recs);
   renderHistory();
+}
+
+function renderPractice() {
+  if (!practice) {
+    $('practiceBody').innerHTML = '<p class="empty">Press Start and sing any comfortable note. Practice builds outward from there, one note at a time.</p>';
+    return;
+  }
+  const notes = [...practice.order].sort((a, b) => a - b);
+  const solid = notes.filter((m) => practice.notes[m].stage === 'mastered').length;
+  const focus = learning(practice);
+  const chip = (m) => {
+    const n = practice.notes[m];
+    const label = { find: 'find', land: 'land', mastered: 'solid' }[n.stage];
+    const dots = n.recent.map((ok) => (ok ? '●' : '○')).join('');
+    return `<span class="pnote ${n.stage}${m === focus ? ' focus' : ''}${m === practice.home ? ' home' : ''}"><b>${noteName(m)}</b><i>${label}</i><em>${dots}</em></span>`;
+  };
+  $('practiceBody').innerHTML = `<p class="practice-sum"><b>${solid}</b> solid · <b>${notes.length}</b> of ${settings.high - settings.low + 1} unlocked · range ${noteName(notes[0])}–${noteName(notes[notes.length - 1])}</p>
+    <div class="ladder">${notes.map(chip).join('')}</div>`;
 }
 
 function renderNoteLog(recs) {
@@ -479,6 +709,7 @@ function commit() {
   store.saveSettings(settings);
   syncSettings();
   if (scopeMode === 'review') renderScope();
+  renderScore();
 }
 
 function toggleSettings(open) {
@@ -506,6 +737,19 @@ onClick('btnReset', () => {
   store.saveLog(log);
   renderScore();
 });
+onClick('modePractice', () => setMode('practice'));
+onClick('modeTest', () => setMode('test'));
+onClick('btnResetPractice', () => {
+  if (!practice || !confirm('Forget your practice progress and pick a new home note?')) return;
+  practice = null;
+  store.savePractice(null);
+  cleanStreak = 0;
+  renderScore();
+  if (mode === 'practice' && state !== S.IDLE && engine.running) {
+    engine.stopAll();
+    begin();
+  }
+});
 for (const [id, scopeName] of [['tabSession', 'session'], ['tabAll', 'all']]) {
   onClick(id, () => {
     statsScope = scopeName;
@@ -528,11 +772,16 @@ addEventListener('keydown', (e) => {
 initSettings();
 if (firstVisit) toggleSettings(true); // pick your range before the first note
 renderControls();
-renderScope();
-renderScore();
+renderMode();
 requestAnimationFrame(tick);
 
 window.pitchmatch = {
+  get mode() {
+    return mode;
+  },
+  get practice() {
+    return practice;
+  },
   get state() {
     return state;
   },
