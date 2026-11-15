@@ -65,9 +65,22 @@ body[data-mode="test"] .only-practice { display: none; }
 /* The practice "lamp": nothing to read, just a colour. */
 .lamp {
   height: 240px; border: 1px solid var(--line); border-radius: 10px; background-color: #0f1319;
-  display: grid; place-items: center; transition: background-color 0.18s linear;
-  font: 600 15px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255, 255, 255, 0.94);
+  display: grid; align-content: center; justify-items: center; gap: 10px; text-align: center;
+  transition: background-color 0.18s linear;
+  font: 600 22px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.94);
 }
+.lamp small { font: 12px var(--mono); letter-spacing: 0.08em; color: var(--muted); }
+.lamp small:empty, .scope-cover b:empty { display: none; }
+
+/* The cue: a huge WAIT while the note plays, a huge SING the instant it's your turn. */
+.lamp[data-cue="wait"] b, .lamp[data-cue="go"] b,
+.scope-cover[data-cue="wait"] b, .scope-cover[data-cue="go"] b {
+  font: 800 clamp(60px, 20vw, 104px)/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: 0.02em;
+}
+[data-cue="wait"] b { color: var(--warn); }
+[data-cue="go"] b { color: #fff; }
+.lamp[data-cue="go"], .scope-cover[data-cue="go"] { box-shadow: inset 0 0 0 3px var(--info); }
 .lamp[data-tone="good"] { background-color: #1c8f63; }
 .lamp[data-tone="warn"] { background-color: #b5851c; }
 .lamp[data-tone="bad"] { background-color: #b23c3c; }
@@ -119,11 +132,13 @@ body[data-mode="test"] .only-practice { display: none; }
 .scope-body { position: relative; }
 #scope { display: block; width: 100%; height: 220px; }
 .scope-cover {
-  position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px;
+  position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 10px;
+  text-align: center; padding: 20px;
   color: var(--muted); font: 12px var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
   background: repeating-linear-gradient(135deg, transparent 0 10px, rgba(255, 255, 255, 0.018) 10px 20px), #0f1319;
 }
 .scope-cover[hidden] { display: none; }
+.scope-cover[data-over] { background: rgba(15, 19, 25, 0.92); }
 .readout { display: flex; align-items: baseline; gap: 8px; }
 .readout b { font-size: 18px; line-height: 1; color: var(--text); letter-spacing: 0; }
 .readout[data-tone="good"] b { color: var(--good); }

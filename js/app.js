@@ -45,6 +45,7 @@ let meter = 0;
 let mode = settings.mode === 'test' ? 'test' : 'practice';
 let practice = store.loadPractice(); // null until a home note is set
 let find = null; // live state of a "find it" round
+let cue = { kind: '', word: '', sub: '' }; // the big WAIT / SING in the middle panel
 let cleanStreak = 0;
 
 // ---------------------------------------------------------------- flow
@@ -132,8 +133,13 @@ function playReference(withContext) {
     }
     at = t0 + intro.length + 0.45;
     say(`Key of ${keyLabel(round.key)}`, 'Hear the key. The note to match comes next.');
-    after((at - engine.now()) * 1000, () => say('Match this note', 'Wait for it to finish, then sing it back.'));
+    setCue('wait', 'Wait', 'hear the key');
+    after((at - engine.now()) * 1000, () => {
+      say('Match this note', 'Wait for it to finish, then sing it back.');
+      setCue('wait', 'Wait', 'this is the note');
+    });
   } else {
+    setCue('wait', 'Wait', 'listen');
     const lead = round.cold
       ? 'Cold check — a note you locked in on an earlier day.'
       : { find: 'Then sing, and steer until the panel goes green.', land: 'Hear it in your head first. Then land on it.' }[round.kind];
@@ -146,6 +152,7 @@ function playReference(withContext) {
   const endMs = (at + NOTE_DUR - engine.now()) * 1000 + 60;
   const gap = round.kind === 'find' ? 0 : settings.gap;
   if (gap > 0) after(endMs, () => say('Hold it in your head', `Stay silent for ${gap} s and keep the note alive in your mind. Then sing.`));
+  for (let k = gap; k >= 1; k--) after(endMs + (gap - k) * 1000, () => setCue('wait', 'Wait', `hold it in your head · ${k}`));
   after(endMs + gap * 1000, listen);
   renderScope();
 }
@@ -157,6 +164,7 @@ function listen() {
   earlyVoice = 0;
   setState(S.LISTENING);
   say(...prompt(), 'go');
+  setCue('wait', 'Wait'); // turns to SING once the tracker has heard silence
 }
 
 const holdFor = () => (round.kind === 'test' ? settings.hold : round.kind === 'land' ? LAND_HOLD : 1);
@@ -186,17 +194,25 @@ function onFrame(f) {
   // Singing before the room has gone quiet can't be judged — there's no clean onset.
   if (tracker.state === 'arming') {
     earlyVoice = voiced ? earlyVoice + engine.frameDt : 0;
-    if (earlyVoice > 0.5) $('detail').textContent = 'Stop for a beat — let it go quiet, then start the note fresh.';
+    if (earlyVoice > 0.5 && !cue.sub) {
+      $('detail').textContent = 'Stop for a beat — let it go quiet, then start the note fresh.';
+      setCue('wait', 'Wait', 'let it go quiet first');
+    }
   }
 
   const ev = tracker.step(f, voiced);
   if (!ev) return;
-  if (ev.type === 'onset') {
+  if (ev.type === 'armed') {
+    if (cue.sub) say(...prompt(), 'go'); // drop the "let it go quiet" hint now that it has
+    setCue('go', 'Sing', round.kind === 'test' && round.tryNo === 1 ? 'blind — trust your ear' : '');
+  } else if (ev.type === 'onset') {
     setState(S.CAPTURING);
     say('Hold it…', '', 'go');
+    setCue('go', 'Hold');
     holdBar(true, holdFor());
   } else if (ev.type === 'short') {
     holdBar(false);
+    setCue('wait', 'Wait');
     setState(S.LISTENING);
     const [title, hint] = prompt();
     say(title, ev.dur > 0.15 ? `Too short — hold the note for ${holdFor()} s.` : hint, 'go');
@@ -210,6 +226,7 @@ function onFrame(f) {
 }
 
 function unreadable() {
+  setCue('wait', 'Wait');
   setState(S.LISTENING);
   say(prompt()[0], "Couldn't read that cleanly — sing a clear, steady “ah”.", 'go');
 }
@@ -217,6 +234,7 @@ function unreadable() {
 function judge(ev) {
   const res = evaluateAttempt(ev.frames, ev.t0, round.freq, settings);
   if (!res.valid) return unreadable();
+  lampSet('');
   const scoop = res.scoop && !res.scoop.minor ? res.scoop : null; // brief lean-ins aren't logged as scoops
   round.tries.push({
     v: res.verdict,
@@ -346,17 +364,22 @@ function findFrame(f, voiced) {
   const dt = engine.frameDt;
   if (find.wait > 0) {
     find.wait -= dt; // let the reference die away in the room
+    if (find.wait <= 0) setCue('go', 'Sing', 'steer to green');
     return;
   }
   if (!voiced) {
     find.gap += dt;
     find.idle += dt;
-    if (find.gap > 0.15) Object.assign(find, { c: null, green: 0 });
+    if (find.gap > 0.15 && find.c !== null) {
+      Object.assign(find, { c: null, green: 0 });
+      setCue('go', 'Sing', 'steer to green');
+    }
     if (find.idle > FIND_IDLE) playReference(false);
     return;
   }
   find.gap = 0;
   find.idle = 0;
+  if (find.c === null) lampSet(''); // the live colour takes over from the cue
   const c = toCents(f.freq);
   find.c = find.c === null ? c : find.c + (c - find.c) * 0.4;
   if (Math.abs(c) <= settings.tol) {
@@ -420,11 +443,28 @@ function judgeLand(ev) {
   after(res.ok ? 1500 : 2800, practiceRound);
 }
 
+/** Show a verdict colour/word in the practice panel (or blank it). Clears any cue. */
 function lampSet(tone, text = '') {
+  cue = { kind: '', word: '', sub: '' };
   const el = $('lamp');
   el.style.backgroundColor = '';
   el.dataset.tone = tone;
+  el.dataset.cue = '';
   $('lampText').textContent = text;
+  $('lampSub').textContent = '';
+  renderCover();
+}
+
+/** The big word in the middle panel: kind 'wait' (not yet) or 'go' (your turn). */
+function setCue(kind, word, sub = '') {
+  cue = { kind, word, sub };
+  const el = $('lamp');
+  el.style.backgroundColor = '';
+  el.dataset.tone = '';
+  el.dataset.cue = kind;
+  $('lampText').textContent = word;
+  $('lampSub').textContent = sub;
+  renderCover();
 }
 
 /** Live colour while finding: green inside the window, through amber, to red far out. */
@@ -433,11 +473,7 @@ function lampLive() {
   const bar = $('holdBar');
   bar.style.transition = 'none';
   bar.style.width = `${Math.min(100, (find.green / FIND_HOLD) * 100)}%`;
-  if (find.c === null) {
-    el.style.backgroundColor = '';
-    $('lampText').textContent = '';
-    return;
-  }
+  if (find.c === null) return; // the cue is showing
   const off = Math.abs(find.c);
   const far = Math.max(0, Math.min(1, (off - settings.tol) / (settings.tol * 3)));
   el.style.backgroundColor = `hsl(${Math.round(152 * (1 - far))} 62% ${Math.round(34 + 4 * far)}%)`;
@@ -497,10 +533,20 @@ function renderControls() {
   if (round && round.key) key.textContent = keyLabel(round.key);
 }
 
+/** Test mode's middle panel: the blind-try cover, which also carries the WAIT / SING cue. */
+function renderCover() {
+  const base = { idle: 'Switches on after a miss', blind: 'Try 1 is blind — trust your ear' }[scopeMode];
+  const over = scopeMode === 'live' && cue.kind === 'wait'; // on try 2, cover the analyzer until it's your turn
+  const el = $('scopeCover');
+  el.hidden = !(base || over);
+  el.dataset.cue = cue.kind;
+  el.toggleAttribute('data-over', over);
+  $('coverBig').textContent = cue.kind ? cue.word : '';
+  $('coverText').textContent = cue.kind ? cue.sub : base || '';
+}
+
 function renderScope() {
-  const cover = { idle: 'Switches on after a miss', blind: 'Try 1 is blind — trust your ear' }[scopeMode];
-  $('scopeCover').hidden = !cover;
-  $('coverText').textContent = cover || '';
+  renderCover();
   $('scopeLabel').textContent = { idle: 'Pitch analyzer', blind: 'Pitch analyzer · off', review: 'Try 1 · what you sang', live: 'Live' }[scopeMode];
   if (scopeMode === 'review' && review) {
     scope.drawReview(review, settings.tol);
