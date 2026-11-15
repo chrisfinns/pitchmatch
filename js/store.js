@@ -1,0 +1,105 @@
+// Settings + round log, kept in localStorage. Stats are derived from the log.
+
+import { NOTE_NAMES, pc, noteName, degreeLabel } from './music.js';
+
+const KEY_SETTINGS = 'pitchmatch.settings.v1';
+const KEY_LOG = 'pitchmatch.log.v1';
+const MAX_LOG = 3000;
+
+export const DEFAULTS = {
+  rangePreset: 'baritone',
+  low: 43,
+  high: 64,
+  anyOctave: false,
+  tol: 25, // ± cents that count as in tune
+  hold: 1, // seconds the note is judged over
+  scoopThr: 30, // cents off at the onset that count as a scoop
+  strictOnset: true, // scoops are misses
+  keyMode: false,
+  keyTonic: 'random',
+  keyScale: 'major',
+  keyIntro: 'scale',
+  timbre: 'piano',
+  auto: true,
+};
+
+function read(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+function write(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* private mode / full — the app still works for this session */
+  }
+}
+
+export const hasSettings = () => read(KEY_SETTINGS) !== null;
+export const loadSettings = () => ({ ...DEFAULTS, ...(read(KEY_SETTINGS) || {}) });
+export const saveSettings = (s) => write(KEY_SETTINGS, s);
+export const loadLog = () => (Array.isArray(read(KEY_LOG)) ? read(KEY_LOG) : []);
+export const saveLog = (log) => write(KEY_LOG, log.slice(-MAX_LOG));
+
+/**
+ * A record: { ts, midi, key: {tonic, scale}|null, degree, result: first|second|miss,
+ *             tries: [{ v: verdict, cents, spread, scoop: 'up'|'down'|null, from }] }
+ */
+export function summarize(recs) {
+  const s = { n: recs.length, first: 0, second: 0, miss: 0, up: 0, down: 0, streak: 0, best: 0, avgErr: null, pct: null };
+  let errSum = 0;
+  let errN = 0;
+  for (const r of recs) {
+    s[r.result]++;
+    s.streak = r.result === 'first' ? s.streak + 1 : 0;
+    s.best = Math.max(s.best, s.streak);
+    const t = r.tries[0];
+    if (!t) continue;
+    if (t.scoop) s[t.scoop]++;
+    if (Math.abs(t.cents) < 600) {
+      errSum += Math.abs(t.cents);
+      errN++;
+    }
+  }
+  if (s.n) s.pct = s.first / s.n;
+  if (errN) s.avgErr = errSum / errN;
+  return s;
+}
+
+/** Per-note difficulty table, hardest first. mode: 'note' | 'pitch' | 'degree'. */
+export function groupStats(recs, mode) {
+  const groups = new Map();
+  for (const r of recs) {
+    let key;
+    let label;
+    if (mode === 'degree') {
+      if (!r.key) continue;
+      key = `${r.key.scale}${r.degree}`;
+      label = `${degreeLabel(r.key.scale, r.degree)} · ${r.key.scale}`;
+    } else if (mode === 'pitch') {
+      key = r.midi;
+      label = noteName(r.midi);
+    } else {
+      key = pc(r.midi);
+      label = NOTE_NAMES[key];
+    }
+    let g = groups.get(key);
+    if (!g) groups.set(key, (g = { key, label, n: 0, first: 0, scoops: 0, errSum: 0, biasSum: 0, errN: 0 }));
+    g.n++;
+    if (r.result === 'first') g.first++;
+    const t = r.tries[0];
+    if (!t) continue;
+    if (t.scoop) g.scoops++;
+    if (Math.abs(t.cents) < 600) {
+      g.errSum += Math.abs(t.cents);
+      g.biasSum += t.cents;
+      g.errN++;
+    }
+  }
+  return [...groups.values()]
+    .map((g) => ({ ...g, pct: g.first / g.n, avgErr: g.errN ? g.errSum / g.errN : null, bias: g.errN ? g.biasSum / g.errN : null }))
+    .sort((a, b) => a.pct - b.pct || (b.avgErr ?? 0) - (a.avgErr ?? 0) || b.n - a.n);
+}

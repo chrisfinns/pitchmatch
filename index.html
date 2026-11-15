@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PitchMatch — sing-back ear training</title>
+  <meta name="description" content="Hear a note, sing it back. Strict pitch analysis that catches scoops, and a log of which notes you nail and which you miss.">
+  <meta name="theme-color" content="#0c0f13">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230c0f13'/%3E%3Cpath d='M4 21c5 0 6-10 12-10s7 5 12 5' fill='none' stroke='%236ee7b7' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-state="idle">
+<main class="app">
+
+  <header class="top">
+    <h1>Pitch<span>Match</span></h1>
+    <div class="chips" aria-live="off">
+      <span class="chip"><b id="chipPct">–</b> first try</span>
+      <span class="chip"><b id="chipStreak">0</b> streak</span>
+    </div>
+    <button id="btnSettings" class="btn ghost" aria-expanded="false" aria-controls="settings">Settings</button>
+  </header>
+
+  <section class="card stage" aria-label="Exercise">
+    <div class="stage-top">
+      <span id="tryBadge" class="badge">Ready</span>
+      <span id="keyBadge" class="badge soft" hidden></span>
+      <span class="spacer"></span>
+      <span class="mic" title="Microphone level">mic <span class="meter"><i id="meterFill"></i></span></span>
+    </div>
+
+    <p id="status" class="status" role="status">Hear a note. Sing it back.</p>
+    <p id="detail" class="detail">Your first try is blind. Miss it, and the pitch analyzer switches on for a second try.</p>
+    <div class="hold"><i id="holdBar"></i></div>
+
+    <div class="scope-wrap">
+      <div class="scope-head">
+        <span id="scopeLabel">Pitch analyzer</span>
+        <span id="readout" class="readout"><b id="readCents"></b><span id="readNote"></span></span>
+      </div>
+      <div class="scope-body">
+        <canvas id="scope" aria-label="Pitch analyzer"></canvas>
+        <div id="scopeCover" class="scope-cover"><span id="coverText"></span></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="btnMain" class="btn primary">Start</button>
+      <button id="btnReplay" class="btn" disabled>Replay note</button>
+      <button id="btnSkip" class="btn" disabled>Skip</button>
+      <button id="btnStop" class="btn ghost" disabled>Stop</button>
+    </div>
+    <p class="hint">Use headphones if you can — the mic is unprocessed so pitch reads true. <kbd>Space</kbd> next · <kbd>R</kbd> replay · <kbd>S</kbd> skip</p>
+  </section>
+
+  <section id="settings" class="card settings" hidden aria-label="Settings">
+    <h2>Voice</h2>
+    <div class="grid">
+      <label>Range <select id="setPreset"></select></label>
+      <label>Lowest note <select id="setLow"></select></label>
+      <label>Highest note <select id="setHigh"></select></label>
+      <label class="check"><input type="checkbox" id="setAnyOctave"> <span>Any octave counts</span></label>
+    </div>
+
+    <h2>Strictness</h2>
+    <div class="grid">
+      <label>In-tune window
+        <select id="setTol">
+          <option value="10">±10¢ — tuner tight</option>
+          <option value="15">±15¢</option>
+          <option value="20">±20¢</option>
+          <option value="25">±25¢ — tight</option>
+          <option value="35">±35¢</option>
+          <option value="50">±50¢ — nearest semitone</option>
+        </select>
+      </label>
+      <label>Hold the note for
+        <select id="setHold">
+          <option value="0.75">0.75 s</option>
+          <option value="1">1 s</option>
+          <option value="1.5">1.5 s</option>
+          <option value="2">2 s</option>
+        </select>
+      </label>
+      <label>Scoop if the onset is off by
+        <select id="setScoop">
+          <option value="20">20¢ — unforgiving</option>
+          <option value="30">30¢</option>
+          <option value="40">40¢</option>
+          <option value="50">50¢ — obvious slides only</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="setStrict"> <span>Scoops count as a miss</span></label>
+    </div>
+
+    <h2>Key</h2>
+    <div class="grid">
+      <label class="check"><input type="checkbox" id="setKeyMode"> <span>Establish a key first</span></label>
+      <label>Key <select id="setKeyTonic"></select></label>
+      <label>Scale
+        <select id="setKeyScale">
+          <option value="major">Major</option>
+          <option value="minor">Minor</option>
+        </select>
+      </label>
+      <label>Intro
+        <select id="setKeyIntro">
+          <option value="scale">Scale up + chord</option>
+          <option value="cadence">I–IV–V–I cadence</option>
+        </select>
+      </label>
+    </div>
+
+    <h2>Playback</h2>
+    <div class="grid">
+      <label>Reference sound
+        <select id="setTimbre">
+          <option value="piano">Grand piano</option>
+          <option value="sine">Pure sine</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="setAuto"> <span>Auto-advance</span></label>
+    </div>
+  </section>
+
+  <section class="card" aria-label="Score">
+    <div class="card-head">
+      <h2>Score</h2>
+      <div class="seg" role="tablist">
+        <button id="tabSession" role="tab" aria-selected="true">Session</button>
+        <button id="tabAll" role="tab" aria-selected="false">All time</button>
+      </div>
+    </div>
+    <div id="stats" class="stats"></div>
+  </section>
+
+  <section class="card" aria-label="Note log">
+    <div class="card-head">
+      <h2>Hardest → easiest</h2>
+      <select id="groupBy" aria-label="Group by">
+        <option value="note">By note</option>
+        <option value="pitch">By exact pitch</option>
+        <option value="degree">By scale degree</option>
+      </select>
+    </div>
+    <div id="noteLog"></div>
+  </section>
+
+  <section class="card" aria-label="History">
+    <div class="card-head">
+      <h2>Recent rounds</h2>
+      <button id="btnReset" class="btn ghost small">Reset log</button>
+    </div>
+    <div id="history"></div>
+  </section>
+
+  <footer>
+    Piano: <a href="https://archive.org/details/SalamanderGrandPianoV3">Salamander Grand Piano V3</a> by Alexander Holm, <a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>. Your log stays in this browser.
+  </footer>
+</main>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
