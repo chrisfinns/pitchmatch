@@ -83,7 +83,7 @@ test('steady but off is flat / sharp', () => {
 });
 
 test('gliding up into the note is a scoop, even though it settles on pitch', () => {
-  const r = judge((t) => (t < 0.18 ? -120 * (1 - t / 0.18) : 0) + jitter() / 3);
+  const r = judge((t) => (t < 0.25 ? -120 * (1 - t / 0.25) : 0) + jitter() / 3);
   assert.equal(r.verdict, 'scoop');
   assert.equal(r.scoop.dir, 'up');
   assert.ok(r.scoop.from < -80);
@@ -91,9 +91,17 @@ test('gliding up into the note is a scoop, even though it settles on pitch', () 
 });
 
 test('falling onto the note is a downward scoop', () => {
-  const r = judge((t) => (t < 0.15 ? 90 * (1 - t / 0.15) : 0));
+  const r = judge((t) => (t < 0.3 ? 90 * (1 - t / 0.3) : 0));
   assert.equal(r.verdict, 'scoop');
   assert.equal(r.scoop.dir, 'down');
+});
+
+test('a brief lean-in that arrives inside a normal onset is reported but passes', () => {
+  const lean = (t) => (t < 0.1 ? -80 * (1 - t / 0.1) : 0);
+  const r = judge(lean);
+  assert.equal(r.verdict, 'hit');
+  assert.ok(r.scoop.minor && r.scoop.dir === 'up' && r.scoop.settle < 0.12);
+  assert.equal(judge(lean, { scoopMs: 50 }).verdict, 'scoop'); // the unforgiving setting still fails it
 });
 
 test('a slow slide is caught too', () => {
@@ -106,13 +114,13 @@ test('a brief onset flicker is not a scoop', () => {
 });
 
 test('with lenient onsets a scoop is flagged but still passes', () => {
-  const r = judge((t) => (t < 0.18 ? -120 * (1 - t / 0.18) : 0), { strictOnset: false });
+  const r = judge((t) => (t < 0.25 ? -120 * (1 - t / 0.25) : 0), { strictOnset: false });
   assert.equal(r.verdict, 'hit');
   assert.equal(r.scoop.dir, 'up');
 });
 
 test('scoop plus wrong pitch reports the pitch, keeps the scoop', () => {
-  const r = judge((t) => -45 + (t < 0.2 ? -100 * (1 - t / 0.2) : 0));
+  const r = judge((t) => -45 + (t < 0.3 ? -100 * (1 - t / 0.3) : 0));
   assert.equal(r.verdict, 'flat');
   assert.equal(r.scoop.dir, 'up');
 });

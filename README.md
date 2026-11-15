@@ -19,7 +19,7 @@ Short sessions spread through the day work better than one long one.
 ## Test mode
 
 - **Try 1 is blind.** No visual — just your ear. Miss it and the note replays for **try 2 with a live pitch analyzer**.
-- **Scoop detection.** The first 250 ms of your note is judged separately from the sustain. Slide up (or down) into the pitch and it's a miss, even if you settle dead on.
+- **Scoop detection.** The first 250 ms of your note is judged separately from the sustain. Every sung note has a short pitch transient at its start (around 120 ms even in trained singers), so an off-pitch start is graded by how long it lasts: a brief lean-in is reported but passes; if you're still 30¢+ off after 120 ms it's a scoop and a miss, even if you settle dead on. Both numbers are adjustable.
 - **Tight scoring.** Default window is ±25¢ held steady for 1 s; go down to ±10¢ in Settings.
 - **Key mode (optional).** Plays a scale or I–IV–V–I cadence first, then a random note from that key. Off by default: one random note in your range.
 - **Log.** First-try %, second-try saves, scoops, and a hardest → easiest table by note, exact pitch or scale degree, with your flat/sharp tendency per note. Stored in your browser only.

@@ -217,12 +217,13 @@ function unreadable() {
 function judge(ev) {
   const res = evaluateAttempt(ev.frames, ev.t0, round.freq, settings);
   if (!res.valid) return unreadable();
+  const scoop = res.scoop && !res.scoop.minor ? res.scoop : null; // brief lean-ins aren't logged as scoops
   round.tries.push({
     v: res.verdict,
     cents: Math.round(res.cents * 10) / 10,
     spread: Math.round(res.spread * 10) / 10,
-    scoop: res.scoop ? res.scoop.dir : null,
-    from: res.scoop ? Math.round(res.scoop.from) : null,
+    scoop: scoop ? scoop.dir : null,
+    from: scoop ? Math.round(scoop.from) : null,
   });
 
   if (round.tryNo === 1) {
@@ -655,6 +656,7 @@ const FIELDS = [
   ['setTol', 'tol'],
   ['setHold', 'hold'],
   ['setScoop', 'scoopThr'],
+  ['setScoopMs', 'scoopMs'],
   ['setStrict', 'strictOnset'],
   ['setStreak', 'landStreak'],
   ['setGap', 'gap'],

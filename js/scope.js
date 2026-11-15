@@ -130,14 +130,15 @@ export class Scope {
 
     if (res.scoop) {
       const first = res.pts[0];
-      g.fillStyle = col.bad;
+      const tint = res.scoop.minor ? col.warn : col.bad;
+      g.fillStyle = tint;
       g.beginPath();
       g.arc(x(first.t), y(first.c), 4, 0, Math.PI * 2);
       g.fill();
       // The trace heads away from the dot diagonally; put the label on the free side.
       const up = res.scoop.dir === 'up';
       const ly = up ? Math.min(y(first.c) + 7, y1 - 13) : Math.max(y(first.c) - 17, y0 + 18);
-      this._label(up ? 'scoop ↗' : 'slide ↘', x(first.t) + 9, ly, col.bad);
+      this._label(res.scoop.minor ? (up ? 'lean-in ↗' : 'lean-in ↘') : up ? 'scoop ↗' : 'slide ↘', x(first.t) + 9, ly, tint);
     }
 
     g.textBaseline = 'top';

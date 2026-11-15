@@ -3,12 +3,17 @@
 // The note is split in two: the ONSET (first 250 ms) and the SUSTAIN (the rest,
 // after it has had time to settle). The sustain decides whether you were on
 // pitch; the onset decides whether you landed on it or slid into it.
+//
+// Every sung note has a short pitch transient at its start — around 120 ms even
+// in trained ensemble singers — so an off-pitch start is graded by how long it
+// lasts: a brief "lean-in" is reported but passes; a scoop is one that is still
+// off after `scoopMs`.
 
 import { noteName } from './music.js';
 
 const ONSET_WIN = 0.25; // seconds examined for a scoop
 const SCOOP_START = 0.1; // a scoop must begin this early in the note…
-const SCOOP_MIN = 0.05; // …and last at least this long
+const LEAN_MIN = 0.05; // …and last at least this long to be more than detector noise
 
 const median = (xs) => quantile(xs, 0.5);
 function quantile(xs, q) {
@@ -25,10 +30,10 @@ function median5(cs) {
 
 /**
  * frames: voiced [{ t, freq }], t0: onset time, targetFreq in Hz.
- * opts: { tol, scoopThr, strictOnset, anyOctave }
+ * opts: { tol, scoopThr, scoopMs, strictOnset, anyOctave }
  */
 export function evaluateAttempt(frames, t0, targetFreq, opts) {
-  const { tol, scoopThr, strictOnset = true, anyOctave = false } = opts;
+  const { tol, scoopThr, scoopMs = 120, strictOnset = true, anyOctave = false } = opts;
   if (frames.length < 12) return { valid: false };
 
   let cs = frames.map((f) => 1200 * Math.log2(f.freq / targetFreq));
@@ -52,10 +57,11 @@ export function evaluateAttempt(frames, t0, targetFreq, opts) {
     if (i0 < 0 || pts[i0].t > SCOOP_START) continue;
     let i1 = i0;
     while (i1 + 1 < pts.length && off(pts[i1 + 1])) i1++;
-    if (pts[i1].t - pts[i0].t < SCOOP_MIN) continue;
+    if (pts[i1].t - pts[i0].t < LEAN_MIN) continue;
     const run = pts.slice(i0, i1 + 1).map((p) => p.c - cents);
     const from = sign < 0 ? Math.min(...run) : Math.max(...run);
-    scoop = { dir: sign < 0 ? 'up' : 'down', from, settle: pts[Math.min(i1 + 1, pts.length - 1)].t };
+    const settle = pts[Math.min(i1 + 1, pts.length - 1)].t; // when the note arrived
+    scoop = { dir: sign < 0 ? 'up' : 'down', from, settle, minor: settle <= scoopMs / 1000 };
     break;
   }
 
@@ -64,7 +70,7 @@ export function evaluateAttempt(frames, t0, targetFreq, opts) {
   if (octave !== 0 && Math.abs(cents - 1200 * octave) <= Math.max(tol, 50)) verdict = 'octave';
   else if (cents < -tol) verdict = 'flat';
   else if (cents > tol) verdict = 'sharp';
-  else if (scoop && strictOnset) verdict = 'scoop';
+  else if (scoop && !scoop.minor && strictOnset) verdict = 'scoop';
   else if (spread > tol + 10) verdict = 'unsteady';
   else verdict = 'hit';
 
@@ -88,7 +94,8 @@ const fmt = (c) => `${c < 0 ? '−' : '+'}${Math.abs(Math.round(c))}¢`;
 /** Human wording for a result. */
 export function describe(res, midi) {
   const abs = Math.abs(Math.round(res.cents));
-  const scoopNote = res.scoop
+  const lean = res.scoop && res.scoop.minor;
+  const scoopNote = res.scoop && !lean
     ? res.scoop.dir === 'up'
       ? `You scooped up into it — started ${Math.abs(Math.round(res.scoop.from))}¢ under.`
       : `You slid down into it — started ${Math.abs(Math.round(res.scoop.from))}¢ over.`
@@ -98,7 +105,11 @@ export function describe(res, midi) {
     case 'hit':
       return {
         title: `On pitch · ${fmt(res.cents)}`,
-        detail: res.scoop ? scoopNote : `Clean onset, steady within ±${Math.round(res.spread)}¢.`,
+        detail: lean
+          ? `Slight lean-in: started ${Math.abs(Math.round(res.scoop.from))}¢ ${res.scoop.dir === 'up' ? 'under' : 'over'}, on pitch within ${Math.round(res.scoop.settle * 1000)} ms. That's inside a normal sung onset.`
+          : res.scoop
+            ? scoopNote
+            : `Clean onset, steady within ±${Math.round(res.spread)}¢.`,
       };
     case 'octave':
       return {
