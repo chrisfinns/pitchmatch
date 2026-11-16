@@ -25,6 +25,7 @@ export const DEFAULTS = {
   keyScale: 'major',
   keyIntro: 'scale',
   timbre: 'piano',
+  speakerFix: true, // iOS: route playback so the phone doesn't turn it down while the mic is live
   auto: true,
 };
 

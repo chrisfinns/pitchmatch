@@ -46,4 +46,6 @@ Deploy on Vercel: import the repo, framework preset **Other**, no build command.
 
 [Salamander Grand Piano V3](https://archive.org/details/SalamanderGrandPianoV3) by Alexander Holm, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Trimmed, shortened and re-encoded (via the [@audio-samples](https://github.com/darosh/samples-piano-mp3) npm packages); one sample every 3 semitones, C2–C6, ~600 KB.
 
+**Loudness.** Raw piano samples differ by 10+ dB note to note and are mostly a spike followed by a quiet tail. Each note is level-matched (`gain` in `js/samples.js`), and the output runs through a limiter and soft clipper, so notes play about 6–10 dB louder than the raw samples without clipping. On iPhone/iPad, where Safari turns Web Audio down while the mic is capturing, playback is routed through an `<audio>` element instead (Settings → Playback → iPhone loud-speaker fix).
+
 Real piano strings are slightly out of 12-TET, so each sample is measured with the app's own detector and corrected at playback — the reference reads within 1¢ of the target on the same ruler that scores your voice. Falls back to a synth if samples can't load. Rebuild with `python3 tools/build_samples.py <download-dir>`.

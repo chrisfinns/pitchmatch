@@ -5,7 +5,7 @@
 // Practice: one note at a time — find it (live colour), then land on it cold;
 // the set of notes widens as each one is mastered (see practice.js).
 
-import { AudioEngine } from './audio.js';
+import { AudioEngine, IS_IOS } from './audio.js';
 import { NoteTracker } from './capture.js';
 import { evaluateAttempt, describe } from './evaluate.js';
 import { RANGES, NOTE_NAMES, midiToFreq, noteName, pickRound, keyContext, keyLabel, degreeLabel } from './music.js';
@@ -76,7 +76,7 @@ async function start() {
   $('btnMain').disabled = true;
   say('Starting…', 'Allow the microphone when your browser asks.');
   try {
-    await engine.start(onFrame);
+    await engine.start(onFrame, { speakerFix: settings.speakerFix });
   } catch (err) {
     renderControls();
     say('Microphone needed', micError(err), 'bad');
@@ -712,6 +712,7 @@ const FIELDS = [
   ['setKeyIntro', 'keyIntro'],
   ['setTimbre', 'timbre'],
   ['setAuto', 'auto'],
+  ['setSpeakerFix', 'speakerFix'],
 ];
 
 function fillSelect(el, options) {
@@ -743,6 +744,10 @@ function initSettings() {
       const el = e.target;
       settings[key] = el.type === 'checkbox' ? el.checked : typeof store.DEFAULTS[key] === 'number' ? Number(el.value) : el.value;
       commit();
+      if (key === 'speakerFix' && engine.running) {
+        stop(); // the audio route is chosen when audio starts
+        say('Stopped', 'Press Start to use the new speaker setting.');
+      }
     });
   }
   $('setPreset').addEventListener('change', (e) => {
@@ -764,6 +769,7 @@ function initSettings() {
     settings.rangePreset = 'custom';
     commit();
   });
+  $('rowSpeakerFix').hidden = !IS_IOS;
   syncSettings();
 }
 
