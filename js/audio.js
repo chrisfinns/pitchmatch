@@ -190,6 +190,7 @@ export class AudioEngine {
     this.ctx = null;
     this.buffers.clear();
     this.voices.clear();
+    this.clickBuf = null;
   }
 
   _loadSamples() {
@@ -262,6 +263,36 @@ export class AudioEngine {
       this.voices.delete(voice);
     };
     return at + dur;
+  }
+
+  /**
+   * One metronome tick for the count-in. A few milliseconds of high-passed
+   * noise: easy to hear on a phone speaker, and with no pitch of its own, so
+   * the detector can never mistake it for a voice if the mic picks it up.
+   */
+  playClick(at) {
+    const ctx = this.ctx;
+    if (!this.clickBuf) {
+      const n = Math.round(ctx.sampleRate * 0.04);
+      this.clickBuf = ctx.createBuffer(1, n, ctx.sampleRate);
+      const d = this.clickBuf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.006));
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = this.clickBuf;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2500;
+    const out = ctx.createGain();
+    out.gain.value = 0.1;
+    src.connect(hp).connect(out).connect(this.master);
+    const voice = { out, sources: [src] };
+    this.voices.add(voice);
+    src.onended = () => {
+      out.disconnect();
+      this.voices.delete(voice);
+    };
+    src.start(at);
   }
 
   /** Cut everything that is sounding or scheduled. */

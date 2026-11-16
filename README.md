@@ -12,6 +12,8 @@ One note at a time, in a small range that widens as you improve.
 4. A streak of clean landings (5 by default; 3–20 in Settings) makes a note solid and unlocks the next one — nearest to home, alternating above and below. Miss a new note three times running and you go back to finding it.
 5. **Retention.** A streak right after hearing a note mostly proves short-term echo memory, so solid notes have to survive time: each one is checked cold at the start of every new day, and keeps returning as mixed review. Miss one twice and it's back in focus.
 
+**Count-in clicks** (on by default, both modes): after the reference note two metronome clicks play half a second apart and you come in on the next beat, so there's no guessing when the app is ready. The big panel shows WAIT until then and SING once the mic is open. The click is a few milliseconds of high-passed noise with no pitch, so it can't be read as singing.
+
 **Silence before you sing** (Settings → Memory, both modes) adds a 2–8 s silent gap after the reference, to train holding a pitch in your head.
 
 Short sessions spread through the day work better than one long one.

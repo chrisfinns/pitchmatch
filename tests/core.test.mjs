@@ -285,3 +285,20 @@ test('practice: mastered notes return as review and are demoted after two misses
   assert.deepEqual(land(p, 50, [false, false]), [null, 'demoted']);
   assert.equal(learning(p), 50); // the slipped note takes focus again
 });
+
+test('a count-in click is never mistaken for a sung note', () => {
+  // Same recipe as AudioEngine.playClick: a few ms of decaying noise.
+  const det = new PitchDetector(SR);
+  const tracker = new NoteTracker({ noise: 0.0005 });
+  for (let trial = 0; trial < 40; trial++) {
+    const x = new Float32Array(SR / 2);
+    const at = 4000 + Math.floor(Math.random() * 4000);
+    for (let i = 0; i < SR * 0.04; i++) x[at + i] = 0.6 * (Math.random() * 2 - 1) * Math.exp(-i / (SR * 0.006));
+    let voicedRun = 0;
+    for (let i = 0; i + 2048 <= x.length; i += HOP) {
+      const f = det.detect(x.subarray(i, i + 2048));
+      voicedRun = tracker.voiced(f) ? voicedRun + 1 : 0;
+      assert.ok(voicedRun < tracker.onsetFrames, `click read as a note (clarity ${f.clarity.toFixed(2)})`);
+    }
+  }
+});

@@ -20,6 +20,7 @@ export const DEFAULTS = {
   strictOnset: true, // scoops are misses
   landStreak: 5, // practice: clean landings in a row that lock a note in
   gap: 0, // seconds of silence between the reference and singing
+  clicks: true, // count-in: metronome clicks after the reference, sing on the next beat
   keyMode: false,
   keyTonic: 'random',
   keyScale: 'major',

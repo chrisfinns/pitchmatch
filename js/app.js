@@ -140,10 +140,14 @@ function playReference(withContext) {
     });
   } else {
     setCue('wait', 'Wait', 'listen');
+    const counted = settings.clicks && round.kind !== 'find';
     const lead = round.cold
       ? 'Cold check — a note you locked in on an earlier day.'
-      : { find: 'Then sing, and steer until the panel goes green.', land: 'Hear it in your head first. Then land on it.' }[round.kind];
-    say(round.tryNo === 1 ? 'Listen…' : 'Listen again…', lead || 'Wait for the note to finish, then sing it back.');
+      : {
+          find: 'Then sing, and steer until the panel goes green.',
+          land: counted ? 'Hear it in your head through the clicks. Then land on it.' : 'Hear it in your head first. Then land on it.',
+        }[round.kind];
+    say(round.tryNo === 1 ? 'Listen…' : 'Listen again…', lead || (counted ? 'Wait for the clicks, then sing it back.' : 'Wait for the note to finish, then sing it back.'));
   }
 
   engine.playNote(round.midi, { at, dur: NOTE_DUR, vel: 0.85, timbre });
@@ -152,8 +156,21 @@ function playReference(withContext) {
   const endMs = (at + NOTE_DUR - engine.now()) * 1000 + 60;
   const gap = round.kind === 'find' ? 0 : settings.gap;
   if (gap > 0) after(endMs, () => say('Hold it in your head', `Stay silent for ${gap} s and keep the note alive in your mind. Then sing.`));
-  for (let k = gap; k >= 1; k--) after(endMs + (gap - k) * 1000, () => setCue('wait', 'Wait', `hold it in your head · ${k}`));
-  after(endMs + gap * 1000, listen);
+  if (settings.clicks && round.kind !== 'find') {
+    // Count-in: steady clicks through the wait, and you come in on the beat after the last one.
+    const beat = gap >= 4 ? 1 : 0.5;
+    const clicks = Math.max(2, Math.round(gap / beat));
+    const first = at + NOTE_DUR + 0.1;
+    for (let i = 0; i < clicks; i++) {
+      engine.playClick(first + i * beat);
+      after((first + i * beat - engine.now()) * 1000, () => setCue('wait', 'Wait', `${gap > 0 ? 'hold it in your head · ' : 'sing in '}${clicks - i}`));
+    }
+    // Open the mic just after the last click, so it has heard silence before the beat you enter on.
+    after((first + (clicks - 1) * beat - engine.now()) * 1000 + 80, listen);
+  } else {
+    for (let k = gap; k >= 1; k--) after(endMs + (gap - k) * 1000, () => setCue('wait', 'Wait', `hold it in your head · ${k}`));
+    after(endMs + gap * 1000, listen);
+  }
   renderScope();
 }
 
@@ -706,6 +723,7 @@ const FIELDS = [
   ['setStrict', 'strictOnset'],
   ['setStreak', 'landStreak'],
   ['setGap', 'gap'],
+  ['setClicks', 'clicks'],
   ['setKeyMode', 'keyMode'],
   ['setKeyTonic', 'keyTonic'],
   ['setKeyScale', 'keyScale'],
