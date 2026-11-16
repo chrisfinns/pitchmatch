@@ -14,6 +14,20 @@ One note at a time, in a small range that widens as you improve.
 
 **Count-in clicks** (on by default, both modes): after the reference note two metronome clicks play half a second apart and you come in on the next beat, so there's no guessing when the app is ready. The big panel shows WAIT until then and SING once the mic is open. The click is a few milliseconds of high-passed noise with no pitch, so it can't be read as singing.
 
+**Result sounds** (on by default, both modes) let you practise with your eyes closed:
+
+| You hear | It means |
+|---|---|
+| a bright ding | landed (two dings: the note is now locked in) |
+| a rising swoosh | you scooped up into it |
+| a falling swoosh | you slid down into it |
+| three quick pulses | on pitch but unsteady |
+| two thuds, high then low | you were under the note |
+| two thuds, low then high | you were over the note |
+| one soft tick | not judged — too early, too short, or unreadable |
+
+The ding is the target note itself a few octaves up; everything else is unpitched noise, so no foreign pitch lands in your ear before the next note.
+
 **Silence before you sing** (Settings → Memory, both modes) adds a 2–8 s silent gap after the reference, to train holding a pitch in your head.
 
 Short sessions spread through the day work better than one long one.

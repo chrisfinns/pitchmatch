@@ -47,6 +47,7 @@ let practice = store.loadPractice(); // null until a home note is set
 let find = null; // live state of a "find it" round
 let cue = { kind: '', word: '', sub: '' }; // the big WAIT / SING in the middle panel
 let cleanStreak = 0;
+let soundUntil = 0;
 
 // ---------------------------------------------------------------- flow
 
@@ -202,7 +203,7 @@ function onFrame(f) {
   const voiced = tracker.voiced(f);
 
   if (scopeMode === 'live' && round && state !== S.PLAYING) {
-    if (voiced) livePts.push({ t: f.t, c: toCents(f.freq) });
+    if (voiced && performance.now() > soundUntil) livePts.push({ t: f.t, c: toCents(f.freq) });
     while (livePts.length && f.t - livePts[0].t > LIVE_SPAN + 0.5) livePts.shift();
   }
   if (state === S.FINDING) return findFrame(f, voiced);
@@ -214,6 +215,7 @@ function onFrame(f) {
     if (earlyVoice > 0.5 && !cue.sub) {
       $('detail').textContent = 'Stop for a beat — let it go quiet, then start the note fresh.';
       setCue('wait', 'Wait', 'let it go quiet first');
+      sound('again');
     }
   }
 
@@ -233,6 +235,7 @@ function onFrame(f) {
     setState(S.LISTENING);
     const [title, hint] = prompt();
     say(title, ev.dur > 0.15 ? `Too short — hold the note for ${holdFor()} s.` : hint, 'go');
+    if (ev.dur > 0.15) sound('again');
   } else if (ev.type === 'done') {
     holdBar(false);
     if (ev.coverage < 0.75) return unreadable();
@@ -242,7 +245,22 @@ function onFrame(f) {
   }
 }
 
+/** Result sounds, so a session can run with your eyes closed (see AudioEngine.earcon). */
+function sound(kind, opts) {
+  if (!settings.sounds || !engine.running) return;
+  engine.earcon(kind, opts);
+  soundUntil = performance.now() + 700; // keep it off the live trace if the mic hears it
+}
+
+function verdictSound(res, lockedIn = false) {
+  if (res.ok) sound(lockedIn ? 'great' : 'good', { freq: round.freq });
+  else if (res.verdict === 'scoop') sound('slide', { dir: res.scoop.dir === 'up' ? 1 : -1 });
+  else if (res.verdict === 'unsteady') sound('wobble');
+  else sound('off', { dir: res.cents < 0 ? -1 : 1 });
+}
+
 function unreadable() {
+  sound('again');
   setCue('wait', 'Wait');
   setState(S.LISTENING);
   say(prompt()[0], "Couldn't read that cleanly — sing a clear, steady “ah”.", 'go');
@@ -268,6 +286,7 @@ function judge(ev) {
     liveMark = { t0: ev.t0, t1: ev.t0 + res.dur };
   }
 
+  verdictSound(res);
   if (res.ok) return finish(round.tryNo === 1 ? 'first' : 'second', res);
   if (round.tryNo === 2) return finish('miss', res);
 
@@ -356,6 +375,7 @@ function startPractice(home, note) {
   store.savePractice(practice);
   setState(S.DONE);
   lampSet('good', noteName(home));
+  sound('good', { freq: midiToFreq(home) });
   say('Got it', `${note} Practice starts there and widens out one note at a time.`, 'good');
   renderScore();
   after(2400, practiceRound);
@@ -414,6 +434,7 @@ function found() {
   holdBar(false);
   setState(S.DONE);
   lampSet('good', 'found it');
+  sound('good', { freq: round.freq });
   say('Found it', `That's ${noteName(round.midi)}. Now land on it cold — no steering.`, 'good');
   renderScore();
   after(1800, practiceRound);
@@ -455,6 +476,7 @@ function judgeLand(ev) {
 
   setState(S.DONE);
   lampSet(tone, word);
+  verdictSound(res, ['unlocked', 'mastered', 'complete'].includes(out.event));
   say(d.title, `${d.detail} ${tail()}`, tone === 'warn' ? 'ok' : tone);
   renderScore();
   after(res.ok ? 1500 : 2800, practiceRound);
@@ -729,6 +751,7 @@ const FIELDS = [
   ['setKeyScale', 'keyScale'],
   ['setKeyIntro', 'keyIntro'],
   ['setTimbre', 'timbre'],
+  ['setSounds', 'sounds'],
   ['setAuto', 'auto'],
   ['setSpeakerFix', 'speakerFix'],
 ];

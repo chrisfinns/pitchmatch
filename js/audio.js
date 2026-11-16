@@ -21,7 +21,7 @@ const TRIM = 1.3; // gain out of it, placing the ceiling just under full scale
  * Output stage: a limiter, then a soft clipper as a safety net. A piano note is
  * a tall spike followed by a quiet tail, so without this the level you can set
  * is capped by the spike. Limiting lets the body of the note sit ~10 dB louder
- * and nothing can clip. Returns { input, output }.
+ * and nothing can clip. Returns { input, side, output }.
  */
 export function outputChain(ctx, { drive = DRIVE, trim = TRIM } = {}) {
   const input = ctx.createGain();
@@ -48,7 +48,12 @@ export function outputChain(ctx, { drive = DRIVE, trim = TRIM } = {}) {
   clip.oversample = '2x';
 
   input.connect(limiter).connect(pre).connect(clip);
-  return { input, output: clip };
+
+  // Clicks and result sounds join after the limiter, so their level is whatever
+  // they are given instead of being squashed up to the piano's.
+  const side = ctx.createGain();
+  side.connect(pre);
+  return { input, side, output: clip };
 }
 
 export class AudioEngine {
@@ -82,6 +87,7 @@ export class AudioEngine {
       ctx.resume(); // inside the gesture, before any await
       const chain = outputChain(ctx);
       this.master = chain.input;
+      this.side = chain.side;
       this.fixed = IS_IOS && speakerFix;
       if (this.fixed && navigator.audioSession) {
         try {
@@ -191,6 +197,7 @@ export class AudioEngine {
     this.buffers.clear();
     this.voices.clear();
     this.clickBuf = null;
+    this.noiseBuf = null;
   }
 
   _loadSamples() {
@@ -284,8 +291,8 @@ export class AudioEngine {
     hp.type = 'highpass';
     hp.frequency.value = 2500;
     const out = ctx.createGain();
-    out.gain.value = 0.1;
-    src.connect(hp).connect(out).connect(this.master);
+    out.gain.value = 0.4;
+    src.connect(hp).connect(out).connect(this.side);
     const voice = { out, sources: [src] };
     this.voices.add(voice);
     src.onended = () => {
@@ -293,6 +300,89 @@ export class AudioEngine {
       this.voices.delete(voice);
     };
     src.start(at);
+  }
+
+  /**
+   * Result sounds, for practising with your eyes closed. They are built so that
+   * nothing with a foreign pitch lands in your ear before the next note:
+   *
+   *   good    a bright ding — at the target note itself, a few octaves up
+   *   great   two dings (a note was locked in)
+   *   slide   a noise swoosh that rises (dir 1: scooped up) or falls (dir -1: slid down)
+   *   wobble  three quick noise pulses (unsteady)
+   *   off     two noise thuds: high→low means you were under, low→high means over
+   *   again   one soft tick (not judged: too short, too early, or unreadable)
+   */
+  earcon(kind, { dir = 1, freq = 880 } = {}) {
+    const at = this.now() + 0.04;
+    let f = freq;
+    while (f < 1400) f *= 2; // above anything the pitch tracker listens for
+    if (kind === 'good') this._ding(at, f);
+    else if (kind === 'great') {
+      this._ding(at, f);
+      this._ding(at + 0.17, f * 2);
+    } else if (kind === 'slide') this._noise(at, 0.32, dir > 0 ? 450 : 3600, dir > 0 ? 3600 : 450, 2.5, 0.45);
+    else if (kind === 'wobble') for (let i = 0; i < 3; i++) this._noise(at + i * 0.12, 0.07, 1600, 1600, 2, 0.55);
+    else if (kind === 'off') {
+      this._noise(at, 0.11, dir < 0 ? 1500 : 650, dir < 0 ? 1500 : 650, 5, dir < 0 ? 0.8 : 1);
+      this._noise(at + 0.16, 0.15, dir < 0 ? 650 : 1500, dir < 0 ? 650 : 1500, 5, dir < 0 ? 1 : 0.8);
+    } else if (kind === 'again') this._noise(at, 0.05, 1100, 1100, 3, 0.45);
+  }
+
+  _track(out, sources, at, dur) {
+    const voice = { out, sources };
+    this.voices.add(voice);
+    sources.forEach((s) => {
+      s.start(at);
+      s.stop(at + dur);
+    });
+    sources[0].onended = () => {
+      out.disconnect();
+      this.voices.delete(voice);
+    };
+  }
+
+  _ding(at, freq) {
+    const ctx = this.ctx;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0, at);
+    out.gain.linearRampToValueAtTime(0.25, at + 0.004);
+    out.gain.setTargetAtTime(0, at + 0.004, 0.09);
+    out.connect(this.side);
+    const sources = [1, 2].map((h) => {
+      const osc = ctx.createOscillator();
+      osc.frequency.value = freq * h;
+      const g = ctx.createGain();
+      g.gain.value = h === 1 ? 1 : 0.25;
+      osc.connect(g).connect(out);
+      return osc;
+    });
+    this._track(out, sources, at, 0.6);
+  }
+
+  /** A burst of band-passed noise whose centre glides from f0 to f1. */
+  _noise(at, dur, f0, f1, q, gain) {
+    const ctx = this.ctx;
+    if (!this.noiseBuf) {
+      this.noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const d = this.noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = q;
+    bp.frequency.setValueAtTime(f0, at);
+    bp.frequency.exponentialRampToValueAtTime(f1, at + dur);
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0, at);
+    out.gain.linearRampToValueAtTime(gain, at + 0.012);
+    out.gain.setValueAtTime(gain, at + dur - 0.03);
+    out.gain.linearRampToValueAtTime(0, at + dur);
+    src.connect(bp).connect(out).connect(this.side);
+    this._track(out, [src], at, dur + 0.02);
   }
 
   /** Cut everything that is sounding or scheduled. */
