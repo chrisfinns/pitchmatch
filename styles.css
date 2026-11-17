@@ -14,6 +14,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; } /* a class that sets display must never un-hide an element */
 
 body {
   margin: 0;

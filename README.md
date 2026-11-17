@@ -12,9 +12,9 @@ One note at a time, in a small range that widens as you improve.
 4. A streak of clean landings (5 by default; 3–20 in Settings) makes a note solid and unlocks the next one — nearest to home, alternating above and below. Miss a new note three times running and you go back to finding it.
 5. **Retention.** A streak right after hearing a note mostly proves short-term echo memory, so solid notes have to survive time: each one is checked cold at the start of every new day, and keeps returning as mixed review. Miss one twice and it's back in focus.
 
-**Count-in clicks** (on by default, both modes): after the reference note two metronome clicks play half a second apart and you come in on the next beat, so there's no guessing when the app is ready. The big panel shows WAIT until then and SING once the mic is open. The click is a few milliseconds of high-passed noise with no pitch, so it can't be read as singing.
+**Count-in clicks** (on by default, both modes; Settings → Sounds → Clicks before you sing): after the reference note two metronome clicks play half a second apart and you come in on the next beat, so there's no guessing when the app is ready. The big panel shows WAIT until then and SING once the mic is open. The click is a few milliseconds of high-passed noise with no pitch, so it can't be read as singing.
 
-**Result sounds** (on by default, both modes) let you practise with your eyes closed:
+**Result sounds** (on by default, both modes; Settings → Sounds → Result sound after you sing) let you practise with your eyes closed:
 
 | You hear | It means |
 |---|---|
@@ -62,6 +62,6 @@ Deploy on Vercel: import the repo, framework preset **Other**, no build command.
 
 [Salamander Grand Piano V3](https://archive.org/details/SalamanderGrandPianoV3) by Alexander Holm, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Trimmed, shortened and re-encoded (via the [@audio-samples](https://github.com/darosh/samples-piano-mp3) npm packages); one sample every 3 semitones, C2–C6, ~600 KB.
 
-**Loudness.** Raw piano samples differ by 10+ dB note to note and are mostly a spike followed by a quiet tail. Each note is level-matched (`gain` in `js/samples.js`), and the output runs through a limiter and soft clipper, so notes play about 6–10 dB louder than the raw samples without clipping. On iPhone/iPad, where Safari turns Web Audio down while the mic is capturing, playback is routed through an `<audio>` element instead (Settings → Playback → iPhone loud-speaker fix).
+**Loudness.** Raw piano samples differ by 10+ dB note to note and are mostly a spike followed by a quiet tail. Each note is level-matched (`gain` in `js/samples.js`), and the output runs through a limiter and soft clipper, so notes play about 6–10 dB louder than the raw samples without clipping. On iPhone/iPad, where Safari turns Web Audio down while the mic is capturing, playback is routed through an `<audio>` element instead (Settings → Sounds → iPhone loud-speaker fix).
 
 Real piano strings are slightly out of 12-TET, so each sample is measured with the app's own detector and corrected at playback — the reference reads within 1¢ of the target on the same ruler that scores your voice. Falls back to a synth if samples can't load. Rebuild with `python3 tools/build_samples.py <download-dir>`.
