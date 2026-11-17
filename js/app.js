@@ -253,7 +253,7 @@ function sound(kind, opts) {
 }
 
 function verdictSound(res, lockedIn = false) {
-  if (res.ok) sound(lockedIn ? 'great' : 'good', { freq: round.freq });
+  if (res.ok) sound(lockedIn ? 'great' : 'good');
   else if (res.verdict === 'scoop') sound('slide', { dir: res.scoop.dir === 'up' ? 1 : -1 });
   else if (res.verdict === 'unsteady') sound('wobble');
   else sound('off', { dir: res.cents < 0 ? -1 : 1 });
@@ -375,7 +375,7 @@ function startPractice(home, note) {
   store.savePractice(practice);
   setState(S.DONE);
   lampSet('good', noteName(home));
-  sound('good', { freq: midiToFreq(home) });
+  sound('good');
   say('Got it', `${note} Practice starts there and widens out one note at a time.`, 'good');
   renderScore();
   after(2400, practiceRound);
@@ -434,7 +434,7 @@ function found() {
   holdBar(false);
   setState(S.DONE);
   lampSet('good', 'found it');
-  sound('good', { freq: round.freq });
+  sound('good');
   say('Found it', `That's ${noteName(round.midi)}. Now land on it cold — no steering.`, 'good');
   renderScore();
   after(1800, practiceRound);

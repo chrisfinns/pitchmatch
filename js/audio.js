@@ -303,24 +303,22 @@ export class AudioEngine {
   }
 
   /**
-   * Result sounds, for practising with your eyes closed. They are built so that
-   * nothing with a foreign pitch lands in your ear before the next note:
+   * Result sounds, for practising with your eyes closed. None of them has a
+   * musical pitch, so nothing competes with the next note in your ear:
    *
-   *   good    a bright ding — at the target note itself, a few octaves up
-   *   great   two dings (a note was locked in)
+   *   good    a bright "tink" (too high and too inharmonic to read as a note)
+   *   great   two tinks (a note was locked in)
    *   slide   a noise swoosh that rises (dir 1: scooped up) or falls (dir -1: slid down)
    *   wobble  three quick noise pulses (unsteady)
    *   off     two noise thuds: high→low means you were under, low→high means over
    *   again   one soft tick (not judged: too short, too early, or unreadable)
    */
-  earcon(kind, { dir = 1, freq = 880 } = {}) {
+  earcon(kind, { dir = 1 } = {}) {
     const at = this.now() + 0.04;
-    let f = freq;
-    while (f < 1400) f *= 2; // above anything the pitch tracker listens for
-    if (kind === 'good') this._ding(at, f);
+    if (kind === 'good') this._tink(at);
     else if (kind === 'great') {
-      this._ding(at, f);
-      this._ding(at + 0.17, f * 2);
+      this._tink(at);
+      this._tink(at + 0.17);
     } else if (kind === 'slide') this._noise(at, 0.32, dir > 0 ? 450 : 3600, dir > 0 ? 3600 : 450, 2.5, 0.45);
     else if (kind === 'wobble') for (let i = 0; i < 3; i++) this._noise(at + i * 0.12, 0.07, 1600, 1600, 2, 0.55);
     else if (kind === 'off') {
@@ -342,22 +340,23 @@ export class AudioEngine {
     };
   }
 
-  _ding(at, freq) {
+  /** A short, glassy tick: partials above 5 kHz at a non-harmonic ratio, so it has no note name. */
+  _tink(at) {
     const ctx = this.ctx;
     const out = ctx.createGain();
     out.gain.setValueAtTime(0, at);
-    out.gain.linearRampToValueAtTime(0.25, at + 0.004);
-    out.gain.setTargetAtTime(0, at + 0.004, 0.09);
+    out.gain.linearRampToValueAtTime(0.2, at + 0.003);
+    out.gain.setTargetAtTime(0, at + 0.003, 0.05);
     out.connect(this.side);
-    const sources = [1, 2].map((h) => {
+    const sources = [5200, 7650].map((f, i) => {
       const osc = ctx.createOscillator();
-      osc.frequency.value = freq * h;
+      osc.frequency.value = f;
       const g = ctx.createGain();
-      g.gain.value = h === 1 ? 1 : 0.25;
+      g.gain.value = i === 0 ? 1 : 0.5;
       osc.connect(g).connect(out);
       return osc;
     });
-    this._track(out, sources, at, 0.6);
+    this._track(out, sources, at, 0.4);
   }
 
   /** A burst of band-passed noise whose centre glides from f0 to f1. */

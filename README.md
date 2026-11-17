@@ -18,7 +18,7 @@ One note at a time, in a small range that widens as you improve.
 
 | You hear | It means |
 |---|---|
-| a bright ding | landed (two dings: the note is now locked in) |
+| a bright tink | landed (two tinks: the note is now locked in) |
 | a rising swoosh | you scooped up into it |
 | a falling swoosh | you slid down into it |
 | three quick pulses | on pitch but unsteady |
@@ -26,7 +26,7 @@ One note at a time, in a small range that widens as you improve.
 | two thuds, low then high | you were over the note |
 | one soft tick | not judged — too early, too short, or unreadable |
 
-The ding is the target note itself a few octaves up; everything else is unpitched noise, so no foreign pitch lands in your ear before the next note.
+None of these has a musical pitch — the tink sits above 5 kHz with inharmonic partials and the rest are noise — so nothing competes with the next note in your ear.
 
 **Silence before you sing** (Settings → Memory, both modes) adds a 2–8 s silent gap after the reference, to train holding a pitch in your head.
 
