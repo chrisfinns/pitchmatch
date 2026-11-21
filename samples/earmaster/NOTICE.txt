@@ -1,0 +1,8 @@
+EarMaster 7 built-in grand piano ("FluidR3 GM EarMaster.sf2", bank 0 program 0,
+velocity 80), rendered one file per key in tune to A4 = 440 Hz (the
+"88 keys in tune" folder at the repo root), then trimmed to 3.3 s and encoded
+as 320 kbps MP3 by tools/build_earmaster.mjs. Keys C2-B5; C6 not supplied.
+
+EarMaster's copy of this soundfont says the samples are not to be
+redistributed. Private use only: keep this repository and its deployment
+private.

@@ -4,7 +4,7 @@
 //
 // For every key the app can play (C2–C6, see js/voicing.js) it:
 //   1. trims the render to the longest note the app plays plus the 1.8 s
-//      release, and encodes it as a 128 kbps stereo MP3 in samples/earmaster/
+//      release, and encodes it as a 320 kbps stereo MP3 in samples/earmaster/
 //   2. measures its pitch with the app's own detector, through the same tone
 //      filter it will be played with, so the reference and the singer are
 //      read with one ruler (the renders are in tune, but a piano's stretched
@@ -41,10 +41,12 @@ if (!src || !existsSync(src)) {
   process.exit(1);
 }
 const missing = KEYS.filter((k) => !existsSync(join(src, k.file)));
-if (missing.length) {
-  console.error('Missing:', missing.map((k) => k.file).join(', '));
+if (missing.length === KEYS.length) {
+  console.error('None of the expected files (036_C2.wav … 084_C6.wav) are in', src);
   process.exit(1);
 }
+// A key without a recording falls back to the Salamander piano in the app.
+if (missing.length) console.warn('Missing, will use the Salamander piano:', missing.map((k) => k.file).join(', '));
 mkdirSync(OUT, { recursive: true });
 
 function decode(file, filter) {
@@ -77,11 +79,11 @@ function rmsDb(x) {
 const lowpass = (fc) => (fc === null ? null : `lowpass=f=${fc.toFixed(1)}:p=2:t=q:w=0.7071`);
 
 const rows = [];
-for (const k of KEYS) {
+for (const k of KEYS.filter((key) => !missing.includes(key))) {
   const mp3 = k.file.replace(/\.wav$/, '.mp3');
   const out = join(OUT, mp3);
   execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(src, k.file), '-t', String(KEEP),
-    '-af', `afade=t=out:st=${KEEP - FADE}:d=${FADE}`, '-ar', String(SR), '-c:a', 'libmp3lame', '-b:a', '128k', out]);
+    '-af', `afade=t=out:st=${KEEP - FADE}:d=${FADE}`, '-ar', String(SR), '-c:a', 'libmp3lame', '-b:a', '320k', out]);
   // Measure the encoded file: exactly what the browser will play.
   const fc = cutoffHz(k);
   const voiced = decode(out, lowpass(fc));

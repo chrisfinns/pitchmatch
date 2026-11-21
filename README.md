@@ -60,7 +60,7 @@ Deploy on Vercel: import the repo, framework preset **Other**, no build command.
 
 ## Piano samples
 
-**EarMaster grand (default, private).** One recording per key from EarMaster 7's built-in piano, voiced the way EarMaster's FluidSynth plays it: a per-key low-pass tone filter, per-key level, and a clean 1.8 s release (`js/voicing.js`, from `PITCHMATCH_PIANO_VOICING.md`). "Brighter piano" in Settings drops the tone filter. Build from the 88 pitch-corrected renders with `node tools/build_earmaster.mjs "<88 keys in tune folder>"`, which writes `samples/earmaster/` (C2–C6, ~2.7 MB) and `js/earmaster.js`. **These recordings must not be redistributed: keep this repo and the deployment private.** Without them the app falls back to the Salamander piano.
+**EarMaster grand (default, private).** One recording per key from EarMaster 7's built-in piano, voiced the way EarMaster's FluidSynth plays it: a per-key low-pass tone filter, per-key level, and a clean 1.8 s release (`js/voicing.js`, from `PITCHMATCH_PIANO_VOICING.md`). "Brighter piano" in Settings drops the tone filter. Build from the 88 pitch-corrected renders with `node tools/build_earmaster.mjs "<88 keys in tune folder>"`, which writes `samples/earmaster/` (C2–C6, 320 kbps MP3, ~6.7 MB) and `js/earmaster.js`. **These recordings must not be redistributed: keep this repo and the deployment private.** Without them the app falls back to the Salamander piano.
 
 **Salamander grand.**
 
