@@ -55,6 +55,8 @@ npm test       # pitch detector + scoring tests
 
 Deploy on Vercel: import the repo, framework preset **Other**, no build command. The mic needs HTTPS (Vercel provides it) or localhost.
 
+**Private repo on Vercel's Hobby plan:** Vercel only deploys commits whose author is the account owner, so commits must be authored with the owner's GitHub identity (this repo's local git config sets it). Commits by any other author show as "Blocked" in Vercel's Deployments list. The raw `88 keys in tune/` WAVs are kept out of the deployment by `.vercelignore`; turn on Vercel Authentication (Settings → Deployment Protection) so the site itself is private too.
+
 ## How the pitch analysis works
 
 - Mic audio is taken raw (echo cancellation, noise suppression and auto-gain off — they bend pitch) and read in an AudioWorklet in fixed 512-sample hops.
