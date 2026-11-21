@@ -60,6 +60,10 @@ Deploy on Vercel: import the repo, framework preset **Other**, no build command.
 
 ## Piano samples
 
+**EarMaster grand (default, private).** One recording per key from EarMaster 7's built-in piano, voiced the way EarMaster's FluidSynth plays it: a per-key low-pass tone filter, per-key level, and a clean 1.8 s release (`js/voicing.js`, from `PITCHMATCH_PIANO_VOICING.md`). "Brighter piano" in Settings drops the tone filter. Build from the 88 pitch-corrected renders with `node tools/build_earmaster.mjs "<88 keys in tune folder>"`, which writes `samples/earmaster/` (C2–C6, ~2.7 MB) and `js/earmaster.js`. **These recordings must not be redistributed: keep this repo and the deployment private.** Without them the app falls back to the Salamander piano.
+
+**Salamander grand.**
+
 [Salamander Grand Piano V3](https://archive.org/details/SalamanderGrandPianoV3) by Alexander Holm, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Trimmed, shortened and re-encoded (via the [@audio-samples](https://github.com/darosh/samples-piano-mp3) npm packages); one sample every 3 semitones, C2–C6, ~600 KB.
 
 **Loudness.** Raw piano samples differ by 10+ dB note to note and are mostly a spike followed by a quiet tail. Each note is level-matched (`gain` in `js/samples.js`), and the output runs through a limiter and soft clipper, so notes play about 6–10 dB louder than the raw samples without clipping. On iPhone/iPad, where Safari turns Web Audio down while the mic is capturing, playback is routed through an `<audio>` element instead (Settings → Sounds → iPhone loud-speaker fix).

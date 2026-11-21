@@ -302,3 +302,30 @@ test('a count-in click is never mistaken for a sung note', () => {
     }
   }
 });
+
+// ---- EarMaster voicing ---------------------------------------------------
+
+import * as V from '../js/voicing.js';
+
+test('voicing covers every key the app plays, C2–C6', () => {
+  for (let m = 36; m <= 84; m++) assert.ok(V.voicingFor(m), `no voicing for ${m}`);
+});
+
+test('voicing: tone filter follows the brief', () => {
+  const c4 = V.voicingFor(60); // 2999.6 Hz in the 71–80 layer
+  assert.ok(Math.abs(V.cutoffHz(c4, { velToFilter: false }) - 2999.6) < 0.5);
+  assert.ok(Math.abs(V.cutoffHz(c4) / 2999.6 - 2 ** (-888 / 1200)) < 0.001); // velocity 80: −888 cents
+  const c5 = V.voicingFor(72); // unfiltered in the table
+  assert.equal(V.cutoffHz(c5, { velToFilter: false }), null);
+  assert.ok(Math.abs(V.cutoffHz(c5) - 11921) < 50); // the modulator's mild ~12 kHz roll-off
+  assert.equal(V.cutoffHz(c4, { toneFilter: false }), null); // "brighter piano"
+});
+
+test('voicing: envelope and level', () => {
+  assert.ok(Math.abs(V.releaseTime() - 1.8) < 0.01);
+  assert.ok(Math.abs(V.releaseTime(-48) - 0.9) < 0.01);
+  assert.equal(V.envDbAt(1.3, 5), 0); // inside the hold: flat
+  assert.ok(Math.abs(V.envDbAt(5 + V.ATTACK + 10, 5) + 9.449) < 0.01); // then −0.945 dB/s
+  assert.equal(V.envDbAt(1000, 0), V.SUSTAIN_DB);
+  assert.ok(Math.abs(20 * Math.log10(V.levelGain(V.voicingFor(60))) - (-6.8 + 40 * Math.log10(80 / 127))) < 0.01);
+});

@@ -1,0 +1,107 @@
+#!/usr/bin/env node
+// Builds the bundled EarMaster piano from the 88 pitch-corrected renders
+// ("88 keys in tune/021_A0.wav" … "108_C8.wav", 4 s stereo WAVs).
+//
+// For every key the app can play (C2–C6, see js/voicing.js) it:
+//   1. trims the render to the longest note the app plays plus the 1.8 s
+//      release, and encodes it as a 128 kbps stereo MP3 in samples/earmaster/
+//   2. measures its pitch with the app's own detector, through the same tone
+//      filter it will be played with, so the reference and the singer are
+//      read with one ruler (the renders are in tune, but a piano's stretched
+//      partials make any detector read it a few cents sharp)
+//   3. measures its loudness, voiced as EarMaster voices it, and sets one
+//      global make-up gain so the keyboard sits at the same level as the
+//      Salamander piano, keeping EarMaster's own key-to-key balance
+// and writes js/earmaster.js.
+//
+// Usage: node tools/build_earmaster.mjs "<path to 88 keys in tune>"
+// Needs: ffmpeg with libmp3lame.
+//
+// These recordings come from EarMaster's copy of the soundfont, which is not
+// to be redistributed: keep the repo and the deployment private.
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PitchDetector } from '../js/pitch.js';
+import { KEYS, cutoffHz, levelGain } from '../js/voicing.js';
+
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const OUT = join(ROOT, 'samples', 'earmaster');
+const SR = 44100;
+const KEEP = 3.3; // s: a 1.3 s note + 1.8 s release, with a little room
+const FADE = 0.15;
+const FROM = 0.1; // s: skip the hammer
+const TO = 1.3; // s: the part the app holds
+const LOUDNESS = -15; // dBFS weighted RMS, the Salamander piano's target (tools/tune_samples.mjs)
+
+const src = process.argv[2];
+if (!src || !existsSync(src)) {
+  console.error('Usage: node tools/build_earmaster.mjs "<folder with 021_A0.wav … 108_C8.wav>"');
+  process.exit(1);
+}
+const missing = KEYS.filter((k) => !existsSync(join(src, k.file)));
+if (missing.length) {
+  console.error('Missing:', missing.map((k) => k.file).join(', '));
+  process.exit(1);
+}
+mkdirSync(OUT, { recursive: true });
+
+function decode(file, filter) {
+  const args = ['-v', 'error', '-i', file];
+  if (filter) args.push('-af', filter);
+  const raw = execFileSync('ffmpeg', [...args, '-f', 'f32le', '-ac', '1', '-ar', String(SR), '-'], { maxBuffer: 1 << 28 });
+  return new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+}
+const median = (xs) => {
+  const s = [...xs].sort((a, b) => a - b);
+  return (s[Math.floor((s.length - 1) / 2)] + s[Math.ceil((s.length - 1) / 2)]) / 2;
+};
+const det = new PitchDetector(SR);
+function cents(x, midi) {
+  const nominal = 440 * 2 ** ((midi - 69) / 12);
+  const reads = [];
+  for (let i = Math.round(FROM * SR); i + det.size <= Math.min(x.length, TO * SR); i += 512) {
+    const r = det.detect(x.subarray(i, i + det.size));
+    if (r.clarity >= 0.9) reads.push(1200 * Math.log2(r.freq / nominal));
+  }
+  return reads.length ? median(reads) : NaN;
+}
+function rmsDb(x) {
+  let e = 0;
+  const n = Math.min(x.length, Math.round(TO * SR));
+  for (let i = 0; i < n; i++) e += x[i] * x[i];
+  return 10 * Math.log10(e / n);
+}
+// Web Audio's lowpass with Q = -3.01 dB is a 2-pole Butterworth.
+const lowpass = (fc) => (fc === null ? null : `lowpass=f=${fc.toFixed(1)}:p=2:t=q:w=0.7071`);
+
+const rows = [];
+for (const k of KEYS) {
+  const mp3 = k.file.replace(/\.wav$/, '.mp3');
+  const out = join(OUT, mp3);
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(src, k.file), '-t', String(KEEP),
+    '-af', `afade=t=out:st=${KEEP - FADE}:d=${FADE}`, '-ar', String(SR), '-c:a', 'libmp3lame', '-b:a', '128k', out]);
+  // Measure the encoded file: exactly what the browser will play.
+  const fc = cutoffHz(k);
+  const voiced = decode(out, lowpass(fc));
+  const c = cents(voiced, k.midi);
+  const bright = cents(decode(out), k.midi);
+  const level = rmsDb(decode(out, [lowpass(fc), 'highpass=f=250:poles=1'].filter(Boolean).join(','))) + 20 * Math.log10(levelGain(k));
+  rows.push({ midi: k.midi, file: mp3, cents: Math.round(c * 100) / 100, centsBright: Math.round(bright * 100) / 100, level });
+  console.log(`${mp3.padEnd(11)} ${c >= 0 ? '+' : ''}${c.toFixed(2)}¢ (unfiltered ${bright >= 0 ? '+' : ''}${bright.toFixed(2)}¢)  cutoff ${fc === null ? 'open' : Math.round(fc) + ' Hz'}  level ${level.toFixed(1)} dB`);
+}
+
+const makeup = Math.round(10 ** ((LOUDNESS - median(rows.map((r) => r.level))) / 20) * 100) / 100;
+const spread = Math.max(...rows.map((r) => r.level)) - Math.min(...rows.map((r) => r.level));
+console.log(`make-up gain ×${makeup}; key-to-key level spread ${spread.toFixed(1)} dB`);
+
+writeFileSync(
+  join(ROOT, 'js', 'earmaster.js'),
+  '// Generated by tools/build_earmaster.mjs: the bundled EarMaster piano keys.\n' +
+    "// cents = each key's pitch vs 12-TET as read by js/pitch.js through its tone filter (centsBright: without it);\n" +
+    '// the player corrects it out.\n' +
+    '// Recordings from EarMaster 7 (FluidR3 GM EarMaster.sf2): not for redistribution, keep this repo private.\n' +
+    `export const MAKEUP = ${makeup};\n` +
+    `export const KEYS = [\n  ${rows.map(({ midi, file, cents, centsBright }) => JSON.stringify({ midi, file, cents, centsBright })).join(',\n  ')},\n];\n`,
+);

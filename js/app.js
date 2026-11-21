@@ -5,7 +5,7 @@
 // Practice: one note at a time — find it (live colour), then land on it cold;
 // the set of notes widens as each one is mastered (see practice.js).
 
-import { AudioEngine, IS_IOS } from './audio.js';
+import { AudioEngine, IS_IOS, HAS_EARMASTER } from './audio.js';
 import { NoteTracker } from './capture.js';
 import { evaluateAttempt, describe } from './evaluate.js';
 import { RANGES, NOTE_NAMES, midiToFreq, noteName, pickRound, keyContext, keyLabel, degreeLabel } from './music.js';
@@ -20,6 +20,7 @@ const LIVE_SPAN = 4;
 const LAND_HOLD = 0.75; // practice landings are short: it's the onset that matters
 const FIND_HOLD = 1.2; // seconds in the green that count as "found"
 const FIND_IDLE = 3.5; // seconds of silence before the note plays again
+const TAIL_MS = 450; // the piano's release before the mic opens, when nothing else fills the wait
 
 const firstVisit = !store.hasSettings();
 const settings = store.loadSettings();
@@ -77,7 +78,8 @@ async function start() {
   $('btnMain').disabled = true;
   say('Starting…', 'Allow the microphone when your browser asks.');
   try {
-    await engine.start(onFrame, { speakerFix: settings.speakerFix });
+    engine.bright = settings.brightPiano;
+    await engine.start(onFrame, { speakerFix: settings.speakerFix, timbre: settings.timbre });
   } catch (err) {
     renderControls();
     say('Microphone needed', micError(err), 'bad');
@@ -170,7 +172,9 @@ function playReference(withContext) {
     after((first + (clicks - 1) * beat - engine.now()) * 1000 + 80, listen);
   } else {
     for (let k = gap; k >= 1; k--) after(endMs + (gap - k) * 1000, () => setCue('wait', 'Wait', `hold it in your head · ${k}`));
-    after(endMs + gap * 1000, listen);
+    // With no gap, let the piano's release (-30 dB after ~0.5 s) die down first,
+    // so a speaker's tail in the mic isn't taken for an early start.
+    after(endMs + (gap > 0 ? gap * 1000 : TAIL_MS), listen);
   }
   renderScope();
 }
@@ -392,7 +396,7 @@ function practiceRound() {
 
 // "Find it": the note loops whenever you go quiet; the panel shows how close you are.
 function listenFind() {
-  find = { wait: 0.3, c: null, green: 0, off: 0, gap: 0, idle: 0 };
+  find = { wait: 0.5, c: null, green: 0, off: 0, gap: 0, idle: 0 };
   setState(S.FINDING);
   say('Find it', 'Sing, and steer until the panel turns green. Then hold it there.', 'go');
 }
@@ -751,6 +755,7 @@ const FIELDS = [
   ['setKeyScale', 'keyScale'],
   ['setKeyIntro', 'keyIntro'],
   ['setTimbre', 'timbre'],
+  ['setBright', 'brightPiano'],
   ['setSounds', 'sounds'],
   ['setAuto', 'auto'],
   ['setSpeakerFix', 'speakerFix'],
@@ -770,6 +775,7 @@ function syncSettings() {
   $('setLow').value = settings.low;
   $('setHigh').value = settings.high;
   for (const id of ['setKeyTonic', 'setKeyScale', 'setKeyIntro']) $(id).disabled = !settings.keyMode;
+  $('rowBright').hidden = !(HAS_EARMASTER && settings.timbre === 'piano');
 }
 
 function initSettings() {
@@ -785,6 +791,8 @@ function initSettings() {
       const el = e.target;
       settings[key] = el.type === 'checkbox' ? el.checked : typeof store.DEFAULTS[key] === 'number' ? Number(el.value) : el.value;
       commit();
+      if (key === 'brightPiano') engine.bright = settings.brightPiano;
+      if (key === 'timbre' && engine.running) engine.useTimbre(settings.timbre);
       if (key === 'speakerFix' && engine.running) {
         stop(); // the audio route is chosen when audio starts
         say('Stopped', 'Press Start to use the new speaker setting.');
@@ -811,6 +819,7 @@ function initSettings() {
     commit();
   });
   $('rowSpeakerFix').hidden = !IS_IOS;
+  if (!HAS_EARMASTER) $('setTimbre').querySelector('option[value="piano"]').textContent = 'Grand piano';
   syncSettings();
 }
 

@@ -1,11 +1,44 @@
-// Web Audio: the reference piano (Salamander samples, tuned to exact pitch,
-// with a synth fallback) and the microphone → pitch-frame pipeline.
+// Web Audio: the reference piano and the microphone → pitch-frame pipeline.
+//
+// Two sampled pianos, both tuned to exact pitch:
+//   'piano'       EarMaster's grand, one recording per key, voiced the way
+//                 EarMaster plays it (tone filter, level, clean release; voicing.js)
+//   'salamander'  Salamander grand, one recording every 3 semitones, transposed
+// 'piano' falls back to Salamander when its samples aren't bundled, and either
+// falls back to a synth if loading fails.
 
 import { PitchDetector } from './pitch.js';
 import { SAMPLES } from './samples.js';
+import { KEYS as EM_KEYS, MAKEUP as EM_MAKEUP } from './earmaster.js';
+import * as V from './voicing.js';
 import { midiToFreq } from './music.js';
 
 const SAMPLE_DIR = new URL('../samples/', import.meta.url);
+const EM_DIR = new URL('../samples/earmaster/', import.meta.url);
+const EM_BY_MIDI = new Map(EM_KEYS.map((k) => [k.midi, k]));
+export const HAS_EARMASTER = EM_KEYS.length > 0;
+
+/**
+ * Volume envelope on `g`, EarMaster style: 1 ms attack, flat through the hold,
+ * dB-linear decay after it, then a dB-linear release from note-off down to
+ * -96 dB (1.8 s from full level). Returns the release length in seconds.
+ */
+function envelope(g, at, dur, level, hold) {
+  const off = at + dur;
+  const holdEnd = at + V.ATTACK + hold;
+  const offDb = V.envDbAt(dur, hold);
+  g.setValueAtTime(0, at);
+  g.linearRampToValueAtTime(level, at + V.ATTACK);
+  if (off > holdEnd) {
+    g.setValueAtTime(level, holdEnd);
+    g.exponentialRampToValueAtTime(level * V.dbToGain(offDb), off);
+  } else {
+    g.setValueAtTime(level, off);
+  }
+  const rel = V.releaseTime(offDb);
+  g.exponentialRampToValueAtTime(level * V.dbToGain(V.FLOOR_DB), off + rel);
+  return rel;
+}
 const WINDOW = 2048;
 const HOP = 512;
 
@@ -59,8 +92,11 @@ export function outputChain(ctx, { drive = DRIVE, trim = TRIM } = {}) {
 export class AudioEngine {
   constructor() {
     this.ctx = null;
-    this.buffers = new Map(); // sample midi → AudioBuffer
+    this.buffers = new Map(); // Salamander sample midi → AudioBuffer
+    this.emBuffers = new Map(); // EarMaster key midi → AudioBuffer
+    this.loading = new Map(); // set name → Promise
     this.voices = new Set();
+    this.bright = false; // EarMaster piano without its tone filter
   }
 
   get running() {
@@ -76,7 +112,7 @@ export class AudioEngine {
    * speakerFix: on iOS, work around the phone turning playback down while the
    * mic is live (see _connectOutput).
    */
-  async start(onFrame, { speakerFix = true } = {}) {
+  async start(onFrame, { speakerFix = true, timbre = 'piano' } = {}) {
     if (!navigator.mediaDevices || !window.AudioWorkletNode) {
       throw Object.assign(new Error('unsupported'), { name: 'Unsupported' });
     }
@@ -137,8 +173,8 @@ export class AudioEngine {
         onFrame(r);
       };
 
-      // Give the samples a moment; anything not loaded in time falls back to the synth.
-      await Promise.race([this._loadSamples(), new Promise((res) => setTimeout(res, 4000))]);
+      // Give the samples a moment; anything not loaded in time falls back.
+      await Promise.race([this.useTimbre(timbre), new Promise((res) => setTimeout(res, 6000))]);
     } catch (err) {
       this.stop();
       throw err;
@@ -195,25 +231,38 @@ export class AudioEngine {
     this.stream = null;
     this.ctx = null;
     this.buffers.clear();
+    this.emBuffers.clear();
+    this.loading.clear();
     this.voices.clear();
     this.clickBuf = null;
     this.noiseBuf = null;
   }
 
-  _loadSamples() {
-    const ctx = this.ctx;
-    return Promise.all(
-      SAMPLES.map(async (s) => {
-        try {
-          const res = await fetch(new URL(s.file, SAMPLE_DIR));
-          if (!res.ok) throw new Error(res.status);
-          const buf = await ctx.decodeAudioData(await res.arrayBuffer());
-          if (this.ctx === ctx) this.buffers.set(s.midi, buf);
-        } catch {
-          /* synth fallback covers it */
-        }
-      }),
-    );
+  /** Load the samples a reference sound needs (once). Resolves when they are in. */
+  useTimbre(timbre) {
+    if (timbre === 'piano' && HAS_EARMASTER) return this._load('earmaster', EM_KEYS, EM_DIR, this.emBuffers);
+    if (timbre === 'piano' || timbre === 'salamander') return this._load('salamander', SAMPLES, SAMPLE_DIR, this.buffers);
+    return Promise.resolve();
+  }
+
+  _load(name, list, dir, into) {
+    if (!this.loading.has(name)) {
+      const ctx = this.ctx;
+      const all = Promise.all(
+        list.map(async (s) => {
+          try {
+            const res = await fetch(new URL(s.file, dir));
+            if (!res.ok) throw new Error(res.status);
+            const buf = await ctx.decodeAudioData(await res.arrayBuffer());
+            if (this.ctx === ctx) into.set(s.midi, buf);
+          } catch {
+            /* the next fallback covers this key */
+          }
+        }),
+      );
+      this.loading.set(name, all);
+    }
+    return this.loading.get(name);
   }
 
   /** Schedule one note. `at` is an AudioContext time. */
@@ -223,17 +272,40 @@ export class AudioEngine {
     out.connect(this.master);
     const sources = [];
 
+    let tail = 0.6; // how long after note-off the sources keep running
+    const em = timbre === 'piano' ? EM_BY_MIDI.get(midi) : null;
+    const emBuf = em && this.emBuffers.get(midi);
     const key = SAMPLES.reduce((best, s) => (Math.abs(s.midi - midi) < Math.abs(best.midi - midi) ? s : best));
-    const buffer = timbre === 'piano' ? this.buffers.get(key.midi) : null;
+    const salBuf = timbre === 'piano' || timbre === 'salamander' ? this.buffers.get(key.midi) : null;
 
-    if (buffer) {
+    if (emBuf) {
+      // EarMaster: one recording per key, already in tune; cancel the few cents
+      // the app's detector reads on it, then voice it the way EarMaster does.
+      const k = V.voicingFor(midi);
       const src = ctx.createBufferSource();
-      src.buffer = buffer;
+      src.buffer = emBuf;
+      src.playbackRate.value = Math.pow(2, -(this.bright ? em.centsBright ?? em.cents : em.cents) / 1200);
+      let node = src;
+      const fc = V.cutoffHz(k, { toneFilter: !this.bright });
+      if (fc !== null) {
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = Math.min(fc, ctx.sampleRate * 0.45);
+        lp.Q.value = V.FILTER_Q_DB;
+        node = node.connect(lp);
+      }
+      node.connect(out);
+      sources.push(src);
+      tail = envelope(out.gain, at, dur, vel * V.levelGain(k) * EM_MAKEUP, k.hold) + 0.02;
+    } else if (salBuf) {
+      const src = ctx.createBufferSource();
+      src.buffer = salBuf;
       // Transpose from the nearest sample and cancel that sample's measured detune.
       src.playbackRate.value = Math.pow(2, (midi - key.midi) / 12 - key.cents / 1200);
-      out.gain.setValueAtTime(vel * (key.gain || 1), at); // level-matched across the keyboard
       src.connect(out);
       sources.push(src);
+      // Level-matched across the keyboard; same clean release as the EarMaster piano.
+      tail = envelope(out.gain, at, dur, vel * (key.gain || 1), Infinity) + 0.02;
     } else if (timbre === 'sine') {
       const osc = ctx.createOscillator();
       osc.frequency.value = midiToFreq(midi);
@@ -258,12 +330,12 @@ export class AudioEngine {
       });
     }
 
-    out.gain.setTargetAtTime(0, at + dur, 0.05); // release
+    if (!emBuf && !salBuf) out.gain.setTargetAtTime(0, at + dur, 0.05); // synth / sine release
     const voice = { out, sources };
     this.voices.add(voice);
     sources.forEach((s) => {
       s.start(at);
-      s.stop(at + dur + 0.6);
+      s.stop(at + dur + tail);
     });
     sources[0].onended = () => {
       out.disconnect();
@@ -389,7 +461,10 @@ export class AudioEngine {
     if (!this.ctx) return;
     const t = this.now();
     for (const v of this.voices) {
-      v.out.gain.cancelScheduledValues(t);
+      // Hold the level where it is (a cancelled ramp would otherwise jump back
+      // to its start value), then fade out fast.
+      if (v.out.gain.cancelAndHoldAtTime) v.out.gain.cancelAndHoldAtTime(t);
+      else v.out.gain.cancelScheduledValues(t);
       v.out.gain.setTargetAtTime(0, t, 0.015);
       v.sources.forEach((s) => {
         try {

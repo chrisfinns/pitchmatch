@@ -25,7 +25,8 @@ export const DEFAULTS = {
   keyTonic: 'random',
   keyScale: 'major',
   keyIntro: 'scale',
-  timbre: 'piano',
+  timbre: 'piano', // piano (EarMaster) | salamander | sine
+  brightPiano: false, // EarMaster piano without its tone filter
   sounds: true, // result sounds, so practice works with your eyes closed
   speakerFix: true, // iOS: route playback so the phone doesn't turn it down while the mic is live
   auto: true,
