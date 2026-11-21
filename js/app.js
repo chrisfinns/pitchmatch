@@ -14,12 +14,13 @@ import { Scope } from './scope.js';
 import * as store from './store.js';
 
 const $ = (id) => document.getElementById(id);
-const S = Object.freeze({ IDLE: 'idle', PLAYING: 'playing', LISTENING: 'listening', CAPTURING: 'capturing', FINDING: 'finding', BETWEEN: 'between', DONE: 'done' });
+const S = Object.freeze({ IDLE: 'idle', PLAYING: 'playing', LISTENING: 'listening', CAPTURING: 'capturing', FINDING: 'finding', BETWEEN: 'between', DONE: 'done', FREE: 'free' });
 const NOTE_DUR = 1.3;
 const LIVE_SPAN = 4;
 const LAND_HOLD = 0.75; // practice landings are short: it's the onset that matters
 const FIND_HOLD = 1.2; // seconds in the green that count as "found"
 const FIND_IDLE = 3.5; // seconds of silence before the note plays again
+const FREE_SPAN = 6; // seconds of trace in analyzer mode
 const TAIL_MS = 450; // the piano's release before the mic opens, when nothing else fills the wait
 
 const firstVisit = !store.hasSettings();
@@ -43,7 +44,10 @@ let lastFrame = null;
 let earlyVoice = 0;
 let statsScope = 'session';
 let meter = 0;
-let mode = settings.mode === 'test' ? 'test' : 'practice';
+let mode = ['test', 'free'].includes(settings.mode) ? settings.mode : 'practice';
+let freePts = []; // analyzer mode: { t, m } with m a fractional MIDI note
+let freeCenter = 57;
+let freeShown = '';
 let practice = store.loadPractice(); // null until a home note is set
 let find = null; // live state of a "find it" round
 let cue = { kind: '', word: '', sub: '' }; // the big WAIT / SING in the middle panel
@@ -93,6 +97,7 @@ async function start() {
 /** Start the next round of whichever mode is selected. */
 function begin() {
   if (mode === 'test') return newRound();
+  if (mode === 'free') return freeRun();
   scopeMode = 'idle';
   if (practice) practiceRound();
   else calibrate();
@@ -205,6 +210,12 @@ function toCents(freq) {
 function onFrame(f) {
   lastFrame = f;
   const voiced = tracker.voiced(f);
+
+  if (state === S.FREE) {
+    if (voiced) freePts.push({ t: f.t, m: 69 + 12 * Math.log2(f.freq / 440) });
+    while (freePts.length && f.t - freePts[0].t > FREE_SPAN + 0.5) freePts.shift();
+    return;
+  }
 
   if (scopeMode === 'live' && round && state !== S.PLAYING) {
     if (voiced && performance.now() > soundUntil) livePts.push({ t: f.t, c: toCents(f.freq) });
@@ -523,6 +534,44 @@ function lampLive() {
   $('lampText').textContent = off <= settings.tol ? 'hold' : find.c < 0 ? '▲ higher' : '▼ lower';
 }
 
+// ---------------------------------------------------------------- analyzer
+
+/** Analyzer mode: no reference, no scoring, just your pitch against the nearest note. */
+function freeRun() {
+  round = null;
+  review = null;
+  scopeMode = 'free';
+  freePts = [];
+  freeCenter = Math.round((settings.low + settings.high) / 2);
+  freeShown = '';
+  holdBar(false);
+  lampSet('');
+  setState(S.FREE);
+  say('Sing or play', 'Your pitch shows live against the nearest note. Play a note on your piano, then sing it and compare the two lines.');
+  renderScope();
+}
+
+function freeTick() {
+  const now = lastFrame.t;
+  const recent = freePts.filter((p) => now - p.t < 0.12).map((p) => p.m).sort((a, b) => a - b);
+  const m = recent.length ? recent[recent.length >> 1] : null;
+  if (m !== null) freeCenter += (Math.round(m) - freeCenter) * 0.06;
+  scope.drawFree(freePts, now, freeCenter, settings.tol, FREE_SPAN);
+  if (m === null) {
+    readout(null);
+    $('status').dataset.tone = '';
+    return;
+  }
+  const near = Math.round(m);
+  readout(100 * (m - near), noteName(near));
+  const off = Math.abs(100 * (m - near));
+  if (freeShown !== noteName(near)) {
+    freeShown = noteName(near);
+    $('status').textContent = freeShown;
+  }
+  $('status').dataset.tone = off <= settings.tol ? 'good' : off <= settings.tol * 2 ? 'ok' : 'bad';
+}
+
 function setMode(next) {
   if (next === mode) return;
   mode = next;
@@ -540,8 +589,11 @@ function renderMode() {
   document.body.dataset.mode = mode;
   $('modePractice').setAttribute('aria-selected', String(mode === 'practice'));
   $('modeTest').setAttribute('aria-selected', String(mode === 'test'));
+  $('modeFree').setAttribute('aria-selected', String(mode === 'free'));
+  renderControls();
   if (state === S.IDLE) {
     if (mode === 'practice') say('Find the note. Then land on it.', 'One note at a time, starting where your voice sits. The range widens as you nail each one.');
+    else if (mode === 'free') say('Just the analyzer', 'No notes from the app and no scoring. Press Start, then play your own piano and sing — your pitch shows live against the nearest note.');
     else say('Hear a note. Sing it back.', 'Your first try is blind. Miss it, and the pitch analyzer switches on for a second try.');
   }
   renderScope();
@@ -560,13 +612,14 @@ function micError(err) {
 function renderControls() {
   document.body.dataset.state = state;
   const main = $('btnMain');
-  main.textContent = { idle: 'Start', playing: 'Playing…', listening: 'Listening…', capturing: 'Listening…', finding: 'Listening…', between: 'Try again', done: 'Next note' }[state];
+  main.textContent = { idle: 'Start', playing: 'Playing…', listening: 'Listening…', capturing: 'Listening…', finding: 'Listening…', between: 'Try again', done: 'Next note', free: 'Listening…' }[state];
   main.disabled = ![S.IDLE, S.BETWEEN, S.DONE].includes(state);
   $('btnReplay').disabled = !(round && round.midi && [S.LISTENING, S.FINDING, S.BETWEEN, S.DONE].includes(state));
-  $('btnSkip').disabled = state === S.IDLE;
+  $('btnSkip').disabled = state === S.IDLE || state === S.FREE;
   $('btnStop').disabled = state === S.IDLE;
 
-  let badge = 'Ready';
+  let badge = mode === 'free' ? 'Analyzer' : 'Ready';
+  if (state === S.FREE) badge = 'Analyzer · live';
   if (round && round.kind === 'test') badge = `Try ${round.tryNo} · ${round.tryNo === 1 ? 'blind' : 'analyzer'}`;
   else if (round && round.kind === 'calibrate') badge = 'Home note';
   else if (round) badge = `${noteName(round.midi)} · ${round.kind === 'find' ? 'find it' : round.cold ? 'cold check' : round.review ? 'review' : 'land it'}`;
@@ -578,7 +631,7 @@ function renderControls() {
 
 /** Test mode's middle panel: the blind-try cover, which also carries the WAIT / SING cue. */
 function renderCover() {
-  const base = { idle: 'Switches on after a miss', blind: 'Try 1 is blind — trust your ear' }[scopeMode];
+  const base = { idle: mode === 'free' ? 'Press Start to see your pitch' : 'Switches on after a miss', blind: 'Try 1 is blind — trust your ear' }[scopeMode];
   const over = scopeMode === 'live' && cue.kind === 'wait'; // on try 2, cover the analyzer until it's your turn
   const el = $('scopeCover');
   el.hidden = !(base || over);
@@ -590,11 +643,11 @@ function renderCover() {
 
 function renderScope() {
   renderCover();
-  $('scopeLabel').textContent = { idle: 'Pitch analyzer', blind: 'Pitch analyzer · off', review: 'Try 1 · what you sang', live: 'Live' }[scopeMode];
+  $('scopeLabel').textContent = { idle: 'Pitch analyzer', blind: 'Pitch analyzer · off', review: 'Try 1 · what you sang', live: 'Live', free: 'Live · nearest note' }[scopeMode];
   if (scopeMode === 'review' && review) {
     scope.drawReview(review, settings.tol);
     readout(review.cents, 'settled');
-  } else if (scopeMode !== 'live') {
+  } else if (scopeMode !== 'live' && scopeMode !== 'free') {
     scope.clear();
     readout(null);
   }
@@ -625,6 +678,7 @@ function tick() {
   $('meterFill').style.width = `${(meter * 100).toFixed(1)}%`;
 
   if (state === S.FINDING) lampLive();
+  if (state === S.FREE && lastFrame) return freeTick();
   if (scopeMode !== 'live' || !lastFrame) return;
   scope.drawLive(livePts, lastFrame.t, settings.tol, liveMark, LIVE_SPAN);
   const head = livePts[livePts.length - 1];
@@ -857,6 +911,7 @@ onClick('btnReset', () => {
 });
 onClick('modePractice', () => setMode('practice'));
 onClick('modeTest', () => setMode('test'));
+onClick('modeFree', () => setMode('free'));
 onClick('btnResetPractice', () => {
   if (!practice || !confirm('Forget your practice progress and pick a new home note?')) return;
   practice = null;

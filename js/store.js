@@ -8,7 +8,7 @@ const KEY_PRACTICE = 'pitchmatch.practice.v1';
 const MAX_LOG = 3000;
 
 export const DEFAULTS = {
-  mode: 'practice', // practice | test
+  mode: 'practice', // practice | test | free (analyzer only)
   rangePreset: 'baritone',
   low: 43,
   high: 64,

@@ -1,5 +1,7 @@
 // The pitch analyzer: cents-vs-target over time, on a canvas.
 
+import { noteName, pc } from './music.js';
+
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const MONO = '10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
@@ -145,6 +147,70 @@ export class Scope {
     for (let t = 0; t <= res.dur + 1e-6; t += 0.25) {
       this._label(`${t.toFixed(2)}s`, x(t), y1 + 5, col.text, t === 0 ? 'left' : t > res.dur - 0.1 ? 'right' : 'center');
     }
+  }
+
+  /**
+   * Analyzer mode: absolute pitch on a note-name scale (no target). `pts` are
+   * { t, m } with m a fractional MIDI note; the view is centred on `center`
+   * and shows `half` semitones either side. Each note line has its ±tol band;
+   * the trace is coloured by how far it sits from the nearest note.
+   */
+  drawFree(pts, now, center, tol, span = 6, half = 5) {
+    const { g, col } = this;
+    const { x0, x1, y0, y1 } = this.box;
+    const y = (m) => y1 - ((m - (center - half)) / (2 * half)) * (y1 - y0);
+    const x = (t) => x1 - ((now - t) / span) * (x1 - x0);
+    const off = (m) => Math.abs(100 * (m - Math.round(m)));
+    const tone = (m) => (off(m) <= tol ? col.good : off(m) <= tol * 2 ? col.warn : col.bad);
+    this.clear();
+
+    g.font = MONO;
+    g.textAlign = 'right';
+    g.textBaseline = 'middle';
+    g.lineWidth = 1;
+    for (let m = Math.ceil(center - half); m <= Math.floor(center + half); m++) {
+      const natural = ![1, 3, 6, 8, 10].includes(pc(m));
+      g.fillStyle = col.band;
+      g.fillRect(x0, y(m + tol / 100), x1 - x0, y(m - tol / 100) - y(m + tol / 100));
+      g.strokeStyle = col.grid;
+      g.globalAlpha = natural ? 0.9 : 0.4;
+      g.beginPath();
+      g.moveTo(x0, Math.round(y(m)) + 0.5);
+      g.lineTo(x1, Math.round(y(m)) + 0.5);
+      g.stroke();
+      g.globalAlpha = natural ? 1 : 0.55;
+      g.fillStyle = col.text;
+      g.fillText(noteName(m), x0 - 6, y(m));
+      g.globalAlpha = 1;
+    }
+
+    const visible = pts.filter((p) => p.t >= now - span);
+    g.save();
+    g.beginPath();
+    g.rect(x0, y0 - 4, x1 - x0, y1 - y0 + 8);
+    g.clip();
+    g.lineWidth = 2.5;
+    g.lineCap = 'round';
+    for (let i = 1; i < visible.length; i++) {
+      const a = visible[i - 1];
+      const b = visible[i];
+      if (b.t - a.t > 0.05 || Math.abs(b.m - a.m) > 1.5) continue; // breath, dropout or octave flip
+      g.strokeStyle = tone(b.m);
+      g.beginPath();
+      g.moveTo(x(a.t), y(a.m));
+      g.lineTo(x(b.t), y(b.m));
+      g.stroke();
+    }
+    const head = visible[visible.length - 1];
+    if (head && now - head.t < 0.1) {
+      g.fillStyle = tone(head.m);
+      g.beginPath();
+      g.arc(x(head.t), y(head.m), 4.5, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+    this._label(`last ${span}s`, x0, y1 + 5, col.text);
+    this._label('now', x1, y1 + 5, col.text, 'right');
   }
 
   /** Scrolling live trace. `mark` shades the stretch that was scored. */

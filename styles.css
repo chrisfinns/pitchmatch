@@ -57,7 +57,13 @@ h1, h2, p { margin: 0; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 
 body[data-mode="practice"] .only-test,
-body[data-mode="test"] .only-practice { display: none; }
+body[data-mode="practice"] .not-practice,
+body[data-mode="test"] .only-practice,
+body[data-mode="free"] .only-practice,
+body[data-mode="free"] .only-test { display: none; }
+body[data-mode="free"] #scope { height: 340px; }
+body[data-mode="free"] .chips, body[data-mode="free"] .hint { visibility: hidden; }
+body[data-mode="free"] .hint { display: none; }
 
 /* ---- stage ---- */
 .modes { margin-bottom: 14px; }
@@ -232,6 +238,7 @@ a { color: var(--info); }
   .app { padding: 12px 12px 32px; }
   .chip:nth-child(2) { display: none; }
   #scope { height: 190px; }
+  body[data-mode="free"] #scope { height: 300px; }
   .lamp { height: 210px; }
   .hint kbd, .hint { font-size: 11px; }
   .controls .btn { flex: 1 1 0; padding: 10px 8px; }

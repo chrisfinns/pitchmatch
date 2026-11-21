@@ -2,6 +2,10 @@
 
 Sing-back ear training. The app plays a note; you sing it back; it tells you exactly where you landed.
 
+## Analyzer mode
+
+No notes from the app and no scoring: press Start and your pitch scrolls live on a note-name scale that follows your voice, coloured by how close you are to the nearest note (green inside the in-tune window). Use it with your own piano: play a note, sing it, and compare the two lines.
+
 ## Practice mode
 
 One note at a time, in a small range that widens as you improve.
