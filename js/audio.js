@@ -14,6 +14,7 @@ import { PitchDetector } from './pitch.js';
 import { SAMPLES } from './samples.js';
 import { KEYS as EM_KEYS, MAKEUP as EM_MAKEUP } from './earmaster.js';
 import { INSTRUMENTS } from './instruments.js';
+import { TRIM_DB } from './levels.js';
 import * as V from './voicing.js';
 import { midiToFreq } from './music.js';
 
@@ -23,10 +24,21 @@ const GM_DIR = new URL('../samples/gm/', import.meta.url);
 const EM_BY_MIDI = new Map(EM_KEYS.map((k) => [k.midi, k]));
 export const HAS_EARMASTER = EM_KEYS.length > 0;
 
+/**
+ * Per-instrument trims (dB), measured through the real output chain by
+ * tools/level_sounds.cjs. Each instrument is already level-matched to the
+ * EarMaster piano going in (EBU R128, tools/build_gm.mjs), but a sustained tone
+ * holds the limiter down for the whole note while a piano decays, so it comes
+ * out louder; these set every instrument level with the piano as played.
+ * Mutable so the leveling tool can try values.
+ */
+export const TRIMS = { ...TRIM_DB };
+const DEFAULT_TRIM_DB = -16;
+
 /** Sparse sample sets, transposed to the nearest sample: Salamander and the instruments. */
 const SETS = {
-  salamander: { dir: SAMPLE_DIR, samples: SAMPLES },
-  ...Object.fromEntries(INSTRUMENTS.map((i) => [i.id, { dir: new URL(`${i.dir}/`, GM_DIR), samples: i.samples }])),
+  salamander: { dir: SAMPLE_DIR, samples: SAMPLES, trim: 1 },
+  ...Object.fromEntries(INSTRUMENTS.map((i) => [i.id, { dir: new URL(`${i.dir}/`, GM_DIR), samples: i.samples, instrument: true }])),
 };
 
 /** Every reference sound, in menu order. */
@@ -47,7 +59,8 @@ function source(timbre, midi) {
   const set = SETS[timbre === 'piano' ? 'salamander' : timbre];
   if (!set) return null;
   const sample = nearest(set.samples, midi);
-  return { url: new URL(sample.file, set.dir).href, sample };
+  const trimDb = set.instrument ? TRIMS[timbre] ?? DEFAULT_TRIM_DB : 0;
+  return { url: new URL(sample.file, set.dir).href, sample, trim: 10 ** (trimDb / 20) };
 }
 
 /**
@@ -118,8 +131,16 @@ export function outputChain(ctx, { drive = DRIVE, trim = TRIM } = {}) {
   // they are given instead of being squashed up to the piano's.
   const side = ctx.createGain();
   side.connect(pre);
-  return { input, side, output: clip };
+
+  // The volume control sits last, so turning it down never changes how the
+  // limiter treats the sound.
+  const vol = ctx.createGain();
+  clip.connect(vol);
+  return { input, side, vol, output: vol };
 }
+
+/** Volume slider 0–100 → gain (squared, so the slider feels even: 50 ≈ −12 dB). */
+export const volumeGain = (v) => (Math.max(0, Math.min(100, v)) / 100) ** 2;
 
 export class AudioEngine {
   constructor() {
@@ -128,6 +149,7 @@ export class AudioEngine {
     this.fetching = new Map(); // url → Promise
     this.voices = new Set();
     this.bright = false; // EarMaster piano without its tone filter
+    this.volume = 100; // 0–100, see setVolume
   }
 
   get running() {
@@ -155,6 +177,8 @@ export class AudioEngine {
       const chain = outputChain(ctx);
       this.master = chain.input;
       this.side = chain.side;
+      this.vol = chain.vol;
+      this.vol.gain.value = volumeGain(this.volume);
       this.fixed = IS_IOS && speakerFix;
       if (this.fixed && navigator.audioSession) {
         try {
@@ -268,6 +292,12 @@ export class AudioEngine {
     this.noiseBuf = null;
   }
 
+  /** Master volume, 0–100. Applies at once, with a short glide so it doesn't click. */
+  setVolume(v) {
+    this.volume = v;
+    if (this.vol) this.vol.gain.setTargetAtTime(volumeGain(v), this.now(), 0.03);
+  }
+
   /** Fetch and decode one file (once). Never rejects: a failed file just stays missing. */
   _file(url) {
     if (!this.fetching.has(url)) {
@@ -346,12 +376,12 @@ export class AudioEngine {
       src.connect(out);
       sources.push(src);
       // Level-matched across the keyboard; same clean release as the EarMaster piano.
-      tail = envelope(out.gain, at, dur, vel * (key.gain || 1), Infinity) + 0.02;
+      tail = envelope(out.gain, at, dur, vel * (key.gain || 1) * src0.trim, Infinity) + 0.02;
     } else if (timbre === 'sine') {
       const osc = ctx.createOscillator();
       osc.frequency.value = midiToFreq(midi);
       out.gain.setValueAtTime(0, at);
-      out.gain.linearRampToValueAtTime(vel * 0.07, at + 0.02);
+      out.gain.linearRampToValueAtTime(vel * 0.04, at + 0.02);
       osc.connect(out);
       sources.push(osc);
     } else {

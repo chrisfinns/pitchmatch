@@ -48,6 +48,7 @@ let mode = ['test', 'focus', 'free'].includes(settings.mode) ? settings.mode : '
 let focusStats = store.loadFocus();
 let focusQueue = []; // upcoming instruments, shuffled each cycle
 let focusSession = { n: 0, clean: 0, streak: 0 };
+let pocket = null; // running pocket session: { noteStart, done: Set, tick, lock }
 let freePts = []; // analyzer mode: { t, m } with m a fractional MIDI note
 let freeCenter = 57;
 let freeShown = '';
@@ -86,6 +87,7 @@ async function start() {
   say('Starting…', 'Allow the microphone when your browser asks.');
   try {
     engine.bright = settings.brightPiano;
+    engine.setVolume(settings.volume);
     await engine.start(onFrame, { speakerFix: settings.speakerFix, timbre: settings.timbre });
   } catch (err) {
     renderControls();
@@ -108,6 +110,7 @@ function begin() {
 }
 
 function stop() {
+  pocketEnd();
   engine.stop();
   round = null;
   lastFrame = null;
@@ -269,7 +272,7 @@ function onFrame(f) {
 
 /** Result sounds, so a session can run with your eyes closed (see AudioEngine.earcon). */
 function sound(kind, opts) {
-  if (!settings.sounds || !engine.running) return;
+  if ((!settings.sounds && !pocket) || !engine.running) return; // pocket mode always speaks up
   engine.earcon(kind, opts);
   soundUntil = performance.now() + 700; // keep it off the live trace if the mic hears it
 }
@@ -562,6 +565,15 @@ function nextFocusSound(prev) {
 
 /** One rep: the focus note, in the next sound of the rotation. */
 async function focusRound() {
+  if (settings.pocket) {
+    const mine0 = seq;
+    if (!pocket) pocketStart();
+    else if (Date.now() - pocket.noteStart >= settings.pocketMinutes * 60000) {
+      setState(S.PLAYING); // keep the mic shut while the change is announced
+      await pocketNextNote();
+      if (mine0 + 1 !== seq || !engine.running) return;
+    }
+  }
   const midi = focusMidi();
   const timbre = nextFocusSound(round && round.timbre);
   round = { kind: 'focus', midi, freq: midiToFreq(midi), timbre, tryNo: 1 };
@@ -621,6 +633,136 @@ function focusOn(midi) {
     renderScore();
   } else setMode('focus');
 }
+
+// ---------------------------------------------------------------- pocket mode
+
+/** "B♭3" → "B flat 3", for speech. */
+const spoken = (m) => noteName(m).replace('♭', ' flat ').replace('♯', ' sharp ').replace(/\s+/g, ' ');
+
+function speak(text) {
+  try {
+    if (!window.speechSynthesis) return false;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.95;
+    speechSynthesis.speak(u);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function wakeLock() {
+  try {
+    if (pocket && navigator.wakeLock && document.visibilityState === 'visible') pocket.lock = await navigator.wakeLock.request('screen');
+  } catch {
+    /* not supported, or refused: the screen may sleep */
+  }
+}
+
+function pocketStart() {
+  pocket = { noteStart: Date.now(), done: new Set([focusMidi()]), tick: setInterval(pocketTick, 1000), lock: null };
+  wakeLock();
+  $('pocket').hidden = false;
+  pocketTick();
+}
+
+function pocketEnd() {
+  if (!pocket) return;
+  clearInterval(pocket.tick);
+  if (pocket.lock) pocket.lock.release().catch(() => {});
+  pocket = null;
+  $('pocket').hidden = true;
+  pocketTick();
+  renderScore();
+}
+
+/** Pocket's next note: one not yet done this session, untried and weakest first. */
+function pocketPick() {
+  const cur = focusMidi();
+  let pool = practice ? [...practice.order] : [];
+  if (pool.length < 2) {
+    pool = [];
+    for (let d = 0; d <= settings.high - settings.low; d++) for (const m of [cur + d, cur - d]) if (m >= settings.low && m <= settings.high && !pool.includes(m)) pool.push(m);
+  }
+  pool = pool.filter((m) => m !== cur && m >= settings.low && m <= settings.high);
+  if (!pool.length) return cur;
+  let fresh = pool.filter((m) => !pocket.done.has(m));
+  if (!fresh.length) {
+    pocket.done = new Set([cur]);
+    fresh = pool;
+  }
+  const score = (m) => {
+    const s = Object.values(focusStats[m] || {}).reduce((a, r) => ({ n: a.n + r.n, clean: a.clean + r.clean }), { n: 0, clean: 0 });
+    return s.n ? s.clean / s.n : -1; // untried first
+  };
+  return fresh.reduce((best, m) => (score(m) < score(best) ? m : best), fresh[0]);
+}
+
+async function pocketNextNote() {
+  const m = pocketPick();
+  pocket.done.add(m);
+  pocket.noteStart = Date.now();
+  settings.focusNote = m;
+  store.saveSettings(settings);
+  syncSettings();
+  focusQueue = [];
+  focusSession = { n: 0, clean: 0, streak: 0 };
+  say(`New note: ${noteName(m)}`, 'Pocket mode moved on.');
+  if (!speak(`New note. ${spoken(m)}`)) sound('great');
+  pocketTick();
+  renderScore();
+  await new Promise((r) => setTimeout(r, 2200));
+}
+
+const POCKET_HINT = $('pocketHint').textContent;
+
+function pocketTick() {
+  $('btnPocketLock').hidden = !(pocket && $('pocket').hidden);
+  if (!pocket) {
+    $('pocketHint').textContent = POCKET_HINT;
+    return;
+  }
+  const left = Math.max(0, settings.pocketMinutes * 60000 - (Date.now() - pocket.noteStart));
+  const t = `${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, '0')}`;
+  $('pocketNote').textContent = noteName(focusMidi());
+  $('pocketNext').textContent = `new note in ${t} · ${focusSession.clean}/${focusSession.n} clean`;
+  $('pocketHint').textContent = `Pocket mode on: ${noteName(focusMidi())}, new note in ${t}.`;
+}
+
+// Hold the unlock button for 1.2 s to leave the locked screen (the session keeps running).
+{
+  const btn = $('pocketUnlock');
+  let timer = null;
+  const cancel = () => {
+    clearTimeout(timer);
+    timer = null;
+    $('pocketHold').style.transition = 'none';
+    $('pocketHold').style.width = '0';
+  };
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    $('pocketHold').style.transition = 'width 1.2s linear';
+    $('pocketHold').style.width = '100%';
+    timer = setTimeout(() => {
+      cancel();
+      $('pocket').hidden = true;
+      pocketTick();
+    }, 1200);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, cancel));
+  // Everything else on the locked screen is swallowed.
+  $('pocket').addEventListener('pointerdown', (e) => e.target.closest('#pocketUnlock') || e.preventDefault());
+  $('pocket').addEventListener('click', (e) => e.stopPropagation());
+}
+onClick('btnPocketLock', () => {
+  if (!pocket) return;
+  $('pocket').hidden = false;
+  pocketTick();
+});
+document.addEventListener('visibilitychange', () => {
+  if (pocket && document.visibilityState === 'visible') wakeLock(); // the lock drops when the page is hidden
+});
 
 function renderFocus() {
   const midi = focusMidi();
@@ -683,6 +825,7 @@ function freeTick() {
 
 function setMode(next) {
   if (next === mode) return;
+  if (next !== 'focus') pocketEnd();
   mode = next;
   settings.mode = next;
   store.saveSettings(settings);
@@ -930,6 +1073,8 @@ const FIELDS = [
   ['setSounds', 'sounds'],
   ['setAuto', 'auto'],
   ['setSpeakerFix', 'speakerFix'],
+  ['setPocket', 'pocket'],
+  ['setPocketMin', 'pocketMinutes'],
 ];
 
 function fillSelect(el, options) {
@@ -947,11 +1092,14 @@ function syncSettings() {
   $('setHigh').value = settings.high;
   for (const id of ['setKeyTonic', 'setKeyScale', 'setKeyIntro']) $(id).disabled = !settings.keyMode;
   $('rowBright').hidden = !(HAS_EARMASTER && settings.timbre === 'piano');
+  $('setVolume').value = String(settings.volume);
+  $('volumeOut').textContent = String(settings.volume);
   const notes = [];
   for (let m = settings.low; m <= settings.high; m++) notes.push([m, noteName(m)]);
   fillSelect($('focusNote'), notes);
   $('focusNote').value = String(focusMidi());
   $('focusRotate').checked = settings.focusRotate;
+  $('setPocketMin').disabled = !settings.pocket;
 }
 
 function initSettings() {
@@ -970,6 +1118,7 @@ function initSettings() {
       settings[key] = el.type === 'checkbox' ? el.checked : typeof store.DEFAULTS[key] === 'number' ? Number(el.value) : el.value;
       commit();
       if (key === 'brightPiano') engine.bright = settings.brightPiano;
+      if (key === 'pocket' && !settings.pocket) pocketEnd();
       if (key === 'timbre' && engine.running) engine.useTimbre(settings.timbre);
       if (key === 'speakerFix' && engine.running) {
         stop(); // the audio route is chosen when audio starts
@@ -1037,6 +1186,12 @@ onClick('modePractice', () => setMode('practice'));
 onClick('modeTest', () => setMode('test'));
 onClick('modeFree', () => setMode('free'));
 onClick('modeFocus', () => setMode('focus'));
+$('setVolume').addEventListener('input', (e) => {
+  settings.volume = Number(e.target.value);
+  $('volumeOut').textContent = String(settings.volume);
+  engine.setVolume(settings.volume); // live while dragging
+});
+$('setVolume').addEventListener('change', () => store.saveSettings(settings));
 $('focusNote').addEventListener('change', (e) => focusOn(Number(e.target.value)));
 $('focusRotate').addEventListener('change', (e) => {
   settings.focusRotate = e.target.checked;
@@ -1070,6 +1225,8 @@ for (const [id, scopeName] of [['tabSession', 'session'], ['tabAll', 'all']]) {
 $('groupBy').addEventListener('change', renderScore);
 
 addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('pocket').hidden) return void ($('pocket').hidden = true);
+  if (!$('pocket').hidden) return e.preventDefault(); // locked: no shortcuts
   if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest('select, input, button, a')) return;
   if (e.code === 'Space') {
     e.preventDefault();

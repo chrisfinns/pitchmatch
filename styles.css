@@ -111,6 +111,23 @@ button.pnote:hover { border-color: #3d4a5c; }
 .focus-controls { margin-bottom: 14px; }
 .focus-sum { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
 .focus-sum b { color: var(--text); font-family: var(--mono); }
+
+/* Pocket mode: a black screen that swallows stray touches; hold the button to get out. */
+.pocket {
+  position: fixed; inset: 0; z-index: 100; background: #000; color: #5b6573;
+  display: grid; align-content: center; justify-items: center; gap: 10px; text-align: center; padding: 24px;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.pocket[hidden] { display: none; }
+.pocket-label { font: 600 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
+.pocket-note { font: 800 56px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #7d8794; }
+.pocket-next { font: 13px var(--mono); }
+.pocket-unlock {
+  position: relative; overflow: hidden; margin-top: 40px; min-width: 200px; min-height: 52px;
+  border: 1px solid #2a3340; border-radius: 26px; background: transparent; color: #7d8794; font: 600 14px system-ui, sans-serif;
+}
+.pocket-unlock i { position: absolute; inset: 0; width: 0; background: #1c3a2e; }
+.pocket-unlock span { position: relative; }
 .stage-top { display: flex; align-items: center; gap: 8px; min-height: 26px; }
 .spacer { flex: 1; }
 .badge {
@@ -186,6 +203,9 @@ select {
 }
 .card-head select { width: auto; min-height: 32px; padding: 4px 8px; font-size: 12px; }
 input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--good); margin: 0; }
+.range { display: flex; align-items: center; gap: 10px; min-height: 40px; }
+.range input { flex: 1; accent-color: var(--good); margin: 0; }
+.range output { font: 13px var(--mono); color: var(--text); width: 3ch; text-align: right; }
 
 /* ---- score ---- */
 .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }

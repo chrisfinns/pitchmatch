@@ -12,6 +12,8 @@ export const DEFAULTS = {
   mode: 'practice', // practice | test | focus | free (analyzer only)
   focusNote: null, // focus mode's note (MIDI); null = start from the practice home note
   focusRotate: true, // focus mode: a different instrument every rep
+  pocket: false, // focus mode, hands-free: screen awake and locked, note changes on a timer
+  pocketMinutes: 5,
   rangePreset: 'baritone',
   low: 43,
   high: 64,
@@ -28,7 +30,8 @@ export const DEFAULTS = {
   keyTonic: 'random',
   keyScale: 'major',
   keyIntro: 'scale',
-  timbre: 'piano', // piano (EarMaster) | salamander | sine
+  volume: 100, // master volume, 0–100
+  timbre: 'piano', // any id in audio.js SOUNDS
   brightPiano: false, // EarMaster piano without its tone filter
   sounds: true, // result sounds, so practice works with your eyes closed
   speakerFix: true, // iOS: route playback so the phone doesn't turn it down while the mic is live

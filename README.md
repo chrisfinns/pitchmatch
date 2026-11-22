@@ -6,6 +6,8 @@ Sing-back ear training. The app plays a note; you sing it back; it tells you exa
 
 Drill one note on repeat. Pick it in the Focus card, or tap any note under Practice → Your notes. Each rep plays the note on a different instrument (shuffled, every sound once per cycle; or keep one sound), then you land on it cold, judged like a practice landing. The card ranks the sounds by how often you land clean on them, so you can see which timbres throw you. Only the focus note's files are downloaded.
 
+**Pocket mode** (in the Focus card) runs it hands-free with your eyes closed or the phone in a pocket: the screen stays awake (Wake Lock) behind a black lock screen that ignores stray touches (hold the button to unlock), results are sounds only, and every 2, 5 or 10 minutes it moves to a new note (untried notes first, then the ones you land least) and announces it by voice. The phone must stay unlocked: browsers stop the mic when the screen locks.
+
 ## Analyzer mode
 
 No notes from the app and no scoring: press Start and your pitch scrolls live on a note-name scale that follows your voice, coloured by how close you are to the nearest note (green inside the in-tune window). Use it with your own piano: play a note, sing it, and compare the two lines.
@@ -73,6 +75,8 @@ Deploy on Vercel: import the repo, framework preset **Other**, no build command.
 **EarMaster grand (default, private).** One recording per key from EarMaster 7's built-in piano, voiced the way EarMaster's FluidSynth plays it: a per-key low-pass tone filter, per-key level, and a clean 1.8 s release (`js/voicing.js`, from `PITCHMATCH_PIANO_VOICING.md`). "Brighter piano" in Settings drops the tone filter. Build from the 88 pitch-corrected renders with `node tools/build_earmaster.mjs "<88 keys in tune folder>"`, which writes `samples/earmaster/` (C2–C6, 320 kbps MP3, ~6.7 MB) and `js/earmaster.js`. **These recordings must not be redistributed: keep this repo and the deployment private.** Without them the app falls back to the Salamander piano.
 
 **Instruments.** Electric piano, harpsichord, reed organ, nylon guitar, cello, strings, "ooh" voices, trumpet, tenor sax, clarinet and flute from the [FluidR3 GM SoundFont](https://packages.debian.org/fluid-soundfont-gm) (Frank Wen, MIT licence; the General MIDI set EarMaster's sounds come from). `node tools/build_gm.mjs /path/to/FluidR3_GM.sf2` renders them with FluidSynth (one note every 3 semitones, dry), and measures each with the app's detector and loudness meter, so every sound plays in tune (within 1.5¢) and at the same level. A few FluidR3 sounds were left out because their pitch reads unstably in the vocal range (vibraphone, "aah" choir, church organ).
+
+**Levels.** Settings → Sounds has a master volume (after the limiter, so it never changes the sound). Every instrument is level-matched to the EarMaster piano going in (EBU R128, `tools/build_gm.mjs`) and then trimmed against it *as played*, through the real output chain, by `node tools/level_sounds.cjs` (needs Playwright) — a sustained tone holds the limiter down where a piano decays, so equal loudness going in isn't equal coming out. All instruments sit 1 dB under the piano.
 
 **Salamander grand.**
 

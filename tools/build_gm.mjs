@@ -6,19 +6,23 @@
 // filters are exactly what a SoundFont player does. One note every 3 semitones
 // across C2–C6 (the app transposes the rest by at most 1.5 semitones, as with
 // the Salamander piano), held for the whole file, dry (no reverb or chorus).
-// Each file is then measured with the app's own pitch detector and loudness
-// meter, so every sound is in tune on the same ruler and plays at the same
-// level, and js/instruments.js is written.
+// Each file is then measured with the app's own pitch detector, so every
+// sound is in tune on the same ruler, and with EBU R128 loudness, so every
+// sample plays as loud as the EarMaster piano does (its keys measured the
+// same way, through their voicing), and js/instruments.js is written.
+// Run after tools/build_earmaster.mjs.
 //
 // Usage: node tools/build_gm.mjs /path/to/FluidR3_GM.sf2
 // Needs: fluidsynth, ffmpeg with libmp3lame. (Debian/Ubuntu: apt install
 // fluidsynth; the SoundFont is in the fluid-soundfont-gm package.)
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PitchDetector } from '../js/pitch.js';
+import { KEYS as VOICING, cutoffHz, levelGain } from '../js/voicing.js';
+import { KEYS as EM_KEYS, MAKEUP as EM_MAKEUP } from '../js/earmaster.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const OUT = join(ROOT, 'samples', 'gm');
@@ -27,7 +31,6 @@ const KEEP = 3.3; // s: a 1.3 s note plus the app's 1.8 s release
 const FADE = 0.15;
 const KEYS = Array.from({ length: 17 }, (_, i) => 36 + 3 * i); // C2, D#2 … C6
 const VELOCITY = 100;
-const LOUDNESS = -15; // dBFS weighted RMS, same target as both pianos
 const MAX_GAIN = 10;
 
 // [id, name, GM program (0-based)]. Chosen for a clear, stable pitch across
@@ -93,12 +96,25 @@ function cents(x, midi) {
   const near = reads.filter((c) => Math.abs(c) < 60);
   return { cents: near.length >= 10 ? median(near) : null, frames: near.length };
 }
-function rmsDb(x) {
-  let e = 0;
-  const n = Math.min(x.length, Math.round(1.3 * SR));
-  for (let i = 0; i < n; i++) e += x[i] * x[i];
-  return 10 * Math.log10(e / n);
+/** Integrated loudness (EBU R128, LUFS) of the part of a file the app holds. */
+function lufsOf(file, filter) {
+  const chain = ['atrim=0:1.3', filter, 'ebur128=framelog=quiet'].filter(Boolean).join(',');
+  const r = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', file, '-af', chain, '-f', 'null', '-'], { encoding: 'utf8' });
+  const m = [...String(r.stderr).matchAll(/I:\s+(-?[\d.]+) LUFS/g)].pop(); // ffmpeg prints its summary on stderr
+  if (!m) throw new Error(`no loudness for ${file}`);
+  return Number(m[1]);
 }
+
+// The target: how loud the EarMaster piano plays, each key through its tone
+// filter and level, measured the same way. Without it, -18 LUFS.
+const emLoud = EM_KEYS.map((k) => {
+  const v = VOICING.find((x) => x.midi === k.midi);
+  const fc = cutoffHz(v);
+  const gain = levelGain(v) * EM_MAKEUP;
+  return lufsOf(join(ROOT, 'samples', 'earmaster', k.file), [fc === null ? null : `lowpass=f=${fc.toFixed(1)}:p=2:t=q:w=0.7071`, `volume=${gain}`].filter(Boolean).join(','));
+});
+const TARGET = emLoud.length ? median(emLoud) : -18;
+console.log(`target loudness ${TARGET.toFixed(1)} LUFS (${emLoud.length ? 'EarMaster piano median' : 'default'})`);
 
 const work = mkdtempSync(join(tmpdir(), 'pm-gm-'));
 const manifest = [];
@@ -117,8 +133,7 @@ for (const [id, name, program] of INSTRUMENTS) {
       '-ar', String(SR), '-c:a', 'libmp3lame', '-b:a', '320k', out]);
     const x = decode(out);
     const { cents: c, frames } = cents(x, midi);
-    const level = rmsDb(decode(out, 'highpass=f=250:poles=1'));
-    const gain = Math.round(Math.min(MAX_GAIN, 10 ** ((LOUDNESS - level) / 20)) * 100) / 100;
+    const gain = Math.round(Math.min(MAX_GAIN, 10 ** ((TARGET - lufsOf(out)) / 20)) * 100) / 100;
     samples.push({ midi, file, cents: c === null ? null : Math.round(c * 100) / 100, gain });
     if (c === null) console.warn(`  ${id} ${midi}: only ${frames} clear pitch frames; using the instrument's typical tuning`);
   }

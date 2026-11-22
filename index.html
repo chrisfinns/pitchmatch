@@ -149,6 +149,7 @@
 
     <h2>Sounds</h2>
     <div class="grid">
+      <label>Volume <span class="range"><input type="range" id="setVolume" min="0" max="100" step="1"><output id="volumeOut">100</output></span></label>
       <label>Reference note
         <select id="setTimbre"></select>
       </label>
@@ -166,7 +167,17 @@
     <div class="grid focus-controls">
       <label>Note <select id="focusNote"></select></label>
       <label class="check"><input type="checkbox" id="focusRotate"> <span>New instrument every rep</span></label>
+      <label class="check"><input type="checkbox" id="setPocket"> <span>Pocket mode</span></label>
+      <label>Pocket: new note every
+        <select id="setPocketMin">
+          <option value="2">2 min</option>
+          <option value="5">5 min</option>
+          <option value="10">10 min</option>
+        </select>
+      </label>
     </div>
+    <p class="focus-sum"><button id="btnPocketLock" class="btn small" type="button" hidden>Lock screen</button></p>
+    <p class="focus-sum" id="pocketHint">Pocket mode: hands-free and eyes-closed. The screen stays on but ignores taps, the note changes on its own and is announced, and results are sounds only. Keep the phone unlocked: it stops if the screen locks.</p>
     <div id="focusBody"></div>
   </section>
 
@@ -213,6 +224,12 @@
     Piano: EarMaster 7's built-in grand (private use only). Fallback piano: <a href="https://archive.org/details/SalamanderGrandPianoV3">Salamander Grand Piano V3</a> by Alexander Holm, <a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>. Your log stays in this browser.
   </footer>
 </main>
+<div id="pocket" class="pocket" hidden>
+  <p class="pocket-label">Pocket mode</p>
+  <p class="pocket-note" id="pocketNote"></p>
+  <p class="pocket-next" id="pocketNext"></p>
+  <button id="pocketUnlock" class="pocket-unlock" type="button"><i id="pocketHold"></i><span>Hold to unlock</span></button>
+</div>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>
