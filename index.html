@@ -25,6 +25,7 @@
     <div class="seg modes" role="tablist" aria-label="Mode">
       <button id="modePractice" role="tab" aria-selected="true">Practice</button>
       <button id="modeTest" role="tab" aria-selected="false">Test</button>
+      <button id="modeFocus" role="tab" aria-selected="false">Focus</button>
       <button id="modeFree" role="tab" aria-selected="false">Analyzer</button>
     </div>
     <div class="stage-top">
@@ -38,9 +39,9 @@
     <p id="detail" class="detail">Your first try is blind. Miss it, and the pitch analyzer switches on for a second try.</p>
     <div class="hold"><i id="holdBar"></i></div>
 
-    <div id="lamp" class="lamp only-practice" data-tone="" data-cue=""><b id="lampText"></b><small id="lampSub"></small></div>
+    <div id="lamp" class="lamp" data-modes="practice focus" data-tone="" data-cue=""><b id="lampText"></b><small id="lampSub"></small></div>
 
-    <div class="scope-wrap not-practice">
+    <div class="scope-wrap" data-modes="test free">
       <div class="scope-head">
         <span id="scopeLabel">Pitch analyzer</span>
         <span id="readout" class="readout"><b id="readCents"></b><span id="readNote"></span></span>
@@ -149,11 +150,7 @@
     <h2>Sounds</h2>
     <div class="grid">
       <label>Reference note
-        <select id="setTimbre">
-          <option value="piano">Grand piano (EarMaster)</option>
-          <option value="salamander">Grand piano (Salamander)</option>
-          <option value="sine">Pure sine</option>
-        </select>
+        <select id="setTimbre"></select>
       </label>
       <label class="check" id="rowBright"><input type="checkbox" id="setBright"> <span>Brighter piano (no tone filter)</span></label>
       <label class="check"><input type="checkbox" id="setClicks"> <span>Clicks before you sing</span></label>
@@ -162,7 +159,18 @@
     </div>
   </section>
 
-  <section class="card only-practice" aria-label="Practice progress">
+  <section class="card" data-modes="focus" aria-label="Focus">
+    <div class="card-head">
+      <h2>Focus on one note</h2>
+    </div>
+    <div class="grid focus-controls">
+      <label>Note <select id="focusNote"></select></label>
+      <label class="check"><input type="checkbox" id="focusRotate"> <span>New instrument every rep</span></label>
+    </div>
+    <div id="focusBody"></div>
+  </section>
+
+  <section class="card" data-modes="practice" aria-label="Practice progress">
     <div class="card-head">
       <h2>Your notes</h2>
       <button id="btnResetPractice" class="btn ghost small">Start over</button>
@@ -170,7 +178,7 @@
     <div id="practiceBody"></div>
   </section>
 
-  <section class="card only-test" aria-label="Score">
+  <section class="card" data-modes="test" aria-label="Score">
     <div class="card-head">
       <h2>Score</h2>
       <div class="seg" role="tablist">
@@ -181,7 +189,7 @@
     <div id="stats" class="stats"></div>
   </section>
 
-  <section class="card only-test" aria-label="Note log">
+  <section class="card" data-modes="test" aria-label="Note log">
     <div class="card-head">
       <h2>Hardest → easiest</h2>
       <select id="groupBy" aria-label="Group by">
@@ -193,7 +201,7 @@
     <div id="noteLog"></div>
   </section>
 
-  <section class="card only-test" aria-label="History">
+  <section class="card" data-modes="test" aria-label="History">
     <div class="card-head">
       <h2>Recent rounds</h2>
       <button id="btnReset" class="btn ghost small">Reset log</button>

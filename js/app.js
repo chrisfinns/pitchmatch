@@ -5,7 +5,7 @@
 // Practice: one note at a time — find it (live colour), then land on it cold;
 // the set of notes widens as each one is mastered (see practice.js).
 
-import { AudioEngine, IS_IOS, HAS_EARMASTER } from './audio.js';
+import { AudioEngine, IS_IOS, HAS_EARMASTER, SOUNDS, soundName } from './audio.js';
 import { NoteTracker } from './capture.js';
 import { evaluateAttempt, describe } from './evaluate.js';
 import { RANGES, NOTE_NAMES, midiToFreq, noteName, pickRound, keyContext, keyLabel, degreeLabel } from './music.js';
@@ -44,7 +44,10 @@ let lastFrame = null;
 let earlyVoice = 0;
 let statsScope = 'session';
 let meter = 0;
-let mode = ['test', 'free'].includes(settings.mode) ? settings.mode : 'practice';
+let mode = ['test', 'focus', 'free'].includes(settings.mode) ? settings.mode : 'practice';
+let focusStats = store.loadFocus();
+let focusQueue = []; // upcoming instruments, shuffled each cycle
+let focusSession = { n: 0, clean: 0, streak: 0 };
 let freePts = []; // analyzer mode: { t, m } with m a fractional MIDI note
 let freeCenter = 57;
 let freeShown = '';
@@ -98,6 +101,7 @@ async function start() {
 function begin() {
   if (mode === 'test') return newRound();
   if (mode === 'free') return freeRun();
+  if (mode === 'focus') return focusRound();
   scopeMode = 'idle';
   if (practice) practiceRound();
   else calibrate();
@@ -130,7 +134,7 @@ function playReference(withContext) {
   setState(S.PLAYING);
   holdBar(false);
   engine.stopAll();
-  const timbre = settings.timbre;
+  const timbre = round.timbre || settings.timbre;
   const t0 = engine.now() + 0.12;
   let at = t0;
 
@@ -149,7 +153,9 @@ function playReference(withContext) {
   } else {
     setCue('wait', 'Wait', 'listen');
     const counted = settings.clicks && round.kind !== 'find';
-    const lead = round.cold
+    const lead = round.kind === 'focus'
+      ? `${soundName(timbre)}. ${counted ? 'Hear it through the clicks, then land on it.' : 'Hear it in your head, then land on it.'}`
+      : round.cold
       ? 'Cold check — a note you locked in on an earlier day.'
       : {
           find: 'Then sing, and steer until the panel goes green.',
@@ -194,11 +200,11 @@ function listen() {
   setCue('wait', 'Wait'); // turns to SING once the tracker has heard silence
 }
 
-const holdFor = () => (round.kind === 'test' ? settings.hold : round.kind === 'land' ? LAND_HOLD : 1);
+const holdFor = () => (round.kind === 'test' ? settings.hold : round.kind === 'land' || round.kind === 'focus' ? LAND_HOLD : 1);
 
 function prompt() {
   if (round.kind === 'calibrate') return ['Sing any comfortable note', 'A relaxed “ah”, wherever your voice sits naturally. Hold it for a second — practice starts from there.'];
-  if (round.kind === 'land') return ['Sing it', 'One short, clean note. Be on it from the first instant — no sliding.'];
+  if (round.kind === 'land' || round.kind === 'focus') return ['Sing it', 'One short, clean note. Be on it from the first instant — no sliding.'];
   return ['Sing it', round.tryNo === 1 ? 'Blind try. Land straight on the pitch and hold it steady.' : 'Watch the analyzer. Hit the centre line from the very first instant.'];
 }
 
@@ -256,6 +262,7 @@ function onFrame(f) {
     if (ev.coverage < 0.75) return unreadable();
     if (round.kind === 'calibrate') setHome(ev);
     else if (round.kind === 'land') judgeLand(ev);
+    else if (round.kind === 'focus') judgeFocus(ev);
     else judge(ev);
   }
 }
@@ -349,7 +356,7 @@ function replay() {
   else if (state === S.BETWEEN) secondTry();
   else if (state === S.DONE) {
     seq++; // holds auto-advance while you compare
-    engine.playNote(round.midi, { dur: NOTE_DUR, vel: 0.85, timbre: settings.timbre });
+    engine.playNote(round.midi, { dur: NOTE_DUR, vel: 0.85, timbre: round.timbre || settings.timbre });
   }
 }
 
@@ -534,6 +541,108 @@ function lampLive() {
   $('lampText').textContent = off <= settings.tol ? 'hold' : find.c < 0 ? '▲ higher' : '▼ lower';
 }
 
+// ---------------------------------------------------------------- focus
+
+/** The sounds focus mode rotates through: every instrument, one piano. */
+const rotationSounds = () => SOUNDS.map((s) => s.id).filter((id) => id !== 'sine' && id !== 'salamander');
+
+function focusMidi() {
+  const m = settings.focusNote ?? (practice ? practice.home : Math.round((settings.low + settings.high) / 2));
+  return Math.max(settings.low, Math.min(settings.high, m));
+}
+
+function nextFocusSound(prev) {
+  if (!settings.focusRotate) return settings.timbre;
+  if (!focusQueue.length) {
+    focusQueue = rotationSounds().sort(() => Math.random() - 0.5);
+    if (focusQueue[0] === prev && focusQueue.length > 1) focusQueue.push(focusQueue.shift()); // no back-to-back repeat
+  }
+  return focusQueue.shift();
+}
+
+/** One rep: the focus note, in the next sound of the rotation. */
+async function focusRound() {
+  const midi = focusMidi();
+  const timbre = nextFocusSound(round && round.timbre);
+  round = { kind: 'focus', midi, freq: midiToFreq(midi), timbre, tryNo: 1 };
+  scopeMode = 'idle';
+  lampSet('');
+  setState(S.PLAYING);
+  say('Listen…', `${soundName(timbre)}.`);
+  const mine = seq;
+  // Fetch this note in every sound of the rotation (a few files), not whole instruments.
+  await Promise.race([engine.prepare(settings.focusRotate ? rotationSounds() : [timbre], midi), new Promise((r) => setTimeout(r, 5000))]);
+  if (mine !== seq || !engine.running) return; // stopped or switched while loading
+  playReference(false);
+}
+
+function judgeFocus(ev) {
+  const res = evaluateAttempt(ev.frames, ev.t0, round.freq, settings);
+  if (!res.valid) return unreadable();
+  const d = describe(res, round.midi);
+  const tone = res.ok ? 'good' : res.verdict === 'flat' || res.verdict === 'sharp' ? 'bad' : 'warn';
+  const word = {
+    hit: 'landed',
+    flat: 'under',
+    sharp: 'over',
+    scoop: res.scoop && res.scoop.dir === 'down' ? 'slid down' : 'scooped up',
+    unsteady: 'unsteady',
+    octave: 'wrong octave',
+  }[res.verdict];
+
+  const byNote = (focusStats[round.midi] ||= {});
+  const st = (byNote[round.timbre] ||= { n: 0, clean: 0 });
+  st.n++;
+  if (res.ok) st.clean++;
+  store.saveFocus(focusStats);
+  focusSession.n++;
+  if (res.ok) focusSession.clean++;
+  focusSession.streak = res.ok ? focusSession.streak + 1 : 0;
+
+  setState(S.DONE);
+  lampSet(tone, word);
+  verdictSound(res);
+  say(d.title, `${d.detail} ${soundName(round.timbre)}: ${st.clean} of ${st.n} clean.`, tone === 'warn' ? 'ok' : tone);
+  renderScore();
+  after(res.ok ? 1500 : 2800, focusRound);
+}
+
+/** Jump to focus mode on a note (from the practice ladder). */
+function focusOn(midi) {
+  settings.focusNote = midi;
+  store.saveSettings(settings);
+  syncSettings();
+  focusQueue = [];
+  if (mode === 'focus') {
+    if (state !== S.IDLE && engine.running) {
+      engine.stopAll();
+      begin();
+    }
+    renderScore();
+  } else setMode('focus');
+}
+
+function renderFocus() {
+  const midi = focusMidi();
+  const byNote = focusStats[midi] || {};
+  const rows = Object.entries(byNote)
+    .map(([id, s]) => ({ id, name: soundName(id), ...s, pct: s.clean / s.n }))
+    .sort((a, b) => a.pct - b.pct || b.n - a.n);
+  const tot = rows.reduce((a, r) => ({ n: a.n + r.n, clean: a.clean + r.clean }), { n: 0, clean: 0 });
+  const sum = `<p class="focus-sum"><b>${noteName(midi)}</b> · this session <b>${focusSession.clean}</b> of ${focusSession.n} clean · run <b>${focusSession.streak}</b>${
+    tot.n ? ` · all time <b>${Math.round((tot.clean / tot.n) * 100)}%</b> of ${tot.n}` : ''
+  }</p>`;
+  if (!rows.length) {
+    $('focusBody').innerHTML = `${sum}<p class="empty">Press Start. Each rep plays ${noteName(midi)} on ${settings.focusRotate ? 'a different instrument' : soundName(settings.timbre)}; the sounds you miss most will rise to the top here.</p>`;
+    return;
+  }
+  const row = (r) => {
+    const color = r.pct < 0.5 ? 'var(--bad)' : r.pct < 0.8 ? 'var(--warn)' : 'var(--good)';
+    return `<tr><td class="name">${r.name}</td><td><span class="bar"><i style="--w:${Math.round(r.pct * 100)}%;--c:${color}"></i><em>${Math.round(r.pct * 100)}%</em></span></td><td class="num">${r.clean}/${r.n}</td></tr>`;
+  };
+  $('focusBody').innerHTML = `${sum}<div class="table-wrap"><table><thead><tr><th>Sound · hardest first</th><th>Clean</th><th class="num">Reps</th></tr></thead><tbody>${rows.map(row).join('')}</tbody></table></div>`;
+}
+
 // ---------------------------------------------------------------- analyzer
 
 /** Analyzer mode: no reference, no scoring, just your pitch against the nearest note. */
@@ -590,9 +699,11 @@ function renderMode() {
   $('modePractice').setAttribute('aria-selected', String(mode === 'practice'));
   $('modeTest').setAttribute('aria-selected', String(mode === 'test'));
   $('modeFree').setAttribute('aria-selected', String(mode === 'free'));
+  $('modeFocus').setAttribute('aria-selected', String(mode === 'focus'));
   renderControls();
   if (state === S.IDLE) {
     if (mode === 'practice') say('Find the note. Then land on it.', 'One note at a time, starting where your voice sits. The range widens as you nail each one.');
+    else if (mode === 'focus') say(`Focus: ${noteName(focusMidi())}`, 'One note on repeat, a different instrument each time. Pick the note below, or tap any note under Practice → Your notes.');
     else if (mode === 'free') say('Just the analyzer', 'No notes from the app and no scoring. Press Start, then play your own piano and sing — your pitch shows live against the nearest note.');
     else say('Hear a note. Sing it back.', 'Your first try is blind. Miss it, and the pitch analyzer switches on for a second try.');
   }
@@ -622,6 +733,7 @@ function renderControls() {
   if (state === S.FREE) badge = 'Analyzer · live';
   if (round && round.kind === 'test') badge = `Try ${round.tryNo} · ${round.tryNo === 1 ? 'blind' : 'analyzer'}`;
   else if (round && round.kind === 'calibrate') badge = 'Home note';
+  else if (round && round.kind === 'focus') badge = `${noteName(round.midi)} · ${soundName(round.timbre)}`;
   else if (round) badge = `${noteName(round.midi)} · ${round.kind === 'find' ? 'find it' : round.cold ? 'cold check' : round.review ? 'review' : 'land it'}`;
   $('tryBadge').textContent = badge;
   const key = $('keyBadge');
@@ -696,12 +808,17 @@ function renderScore() {
     $('chipA').textContent = solid;
     $('chipALabel').textContent = solid === 1 ? 'note solid' : 'notes solid';
     $('chipB').textContent = cleanStreak;
+  } else if (mode === 'focus') {
+    $('chipA').textContent = focusSession.n ? pctText(focusSession.clean / focusSession.n) : '–';
+    $('chipALabel').textContent = 'clean';
+    $('chipB').textContent = focusSession.streak;
   } else {
     $('chipA').textContent = pctText(now.pct);
     $('chipALabel').textContent = 'first try';
     $('chipB').textContent = now.streak;
   }
   renderPractice();
+  renderFocus();
 
   const recs = statsScope === 'session' ? session : log;
   const s = statsScope === 'session' ? now : store.summarize(log);
@@ -731,7 +848,7 @@ function renderPractice() {
     const n = practice.notes[m];
     const label = { find: 'find', land: `land ${n.streak || 0}/${settings.landStreak}`, mastered: 'solid' }[n.stage];
     const dots = n.recent.map((ok) => (ok ? '●' : '○')).join('');
-    return `<span class="pnote ${n.stage}${m === focus ? ' focus' : ''}${m === practice.home ? ' home' : ''}"><b>${noteName(m)}</b><i>${label}</i><em>${dots}</em></span>`;
+    return `<button type="button" class="pnote ${n.stage}${m === focus ? ' focus' : ''}${m === practice.home ? ' home' : ''}" data-midi="${m}" title="Focus on ${noteName(m)}"><b>${noteName(m)}</b><i>${label}</i><em>${dots}</em></button>`;
   };
   $('practiceBody').innerHTML = `<p class="practice-sum"><b>${solid}</b> solid · <b>${notes.length}</b> of ${settings.high - settings.low + 1} unlocked · range ${noteName(notes[0])}–${noteName(notes[notes.length - 1])}</p>
     <div class="ladder">${notes.map(chip).join('')}</div>`;
@@ -830,6 +947,11 @@ function syncSettings() {
   $('setHigh').value = settings.high;
   for (const id of ['setKeyTonic', 'setKeyScale', 'setKeyIntro']) $(id).disabled = !settings.keyMode;
   $('rowBright').hidden = !(HAS_EARMASTER && settings.timbre === 'piano');
+  const notes = [];
+  for (let m = settings.low; m <= settings.high; m++) notes.push([m, noteName(m)]);
+  fillSelect($('focusNote'), notes);
+  $('focusNote').value = String(focusMidi());
+  $('focusRotate').checked = settings.focusRotate;
 }
 
 function initSettings() {
@@ -839,6 +961,8 @@ function initSettings() {
   fillSelect($('setHigh'), notes);
   fillSelect($('setPreset'), [...Object.entries(RANGES).map(([k, r]) => [k, r.label]), ['custom', 'Custom']]);
   fillSelect($('setKeyTonic'), [['random', 'Random'], ...NOTE_NAMES.map((n, i) => [i, n])]);
+  fillSelect($('setTimbre'), SOUNDS.map((s) => [s.id, s.name]));
+  if (!SOUNDS.some((s) => s.id === settings.timbre)) settings.timbre = 'piano';
 
   for (const [id, key] of FIELDS) {
     $(id).addEventListener('change', (e) => {
@@ -912,6 +1036,18 @@ onClick('btnReset', () => {
 onClick('modePractice', () => setMode('practice'));
 onClick('modeTest', () => setMode('test'));
 onClick('modeFree', () => setMode('free'));
+onClick('modeFocus', () => setMode('focus'));
+$('focusNote').addEventListener('change', (e) => focusOn(Number(e.target.value)));
+$('focusRotate').addEventListener('change', (e) => {
+  settings.focusRotate = e.target.checked;
+  store.saveSettings(settings);
+  focusQueue = [];
+  renderScore();
+});
+$('practiceBody').addEventListener('click', (e) => {
+  const chip = e.target.closest('button.pnote');
+  if (chip) focusOn(Number(chip.dataset.midi));
+});
 onClick('btnResetPractice', () => {
   if (!practice || !confirm('Forget your practice progress and pick a new home note?')) return;
   practice = null;

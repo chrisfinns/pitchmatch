@@ -56,18 +56,18 @@ h1, h2, p { margin: 0; }
 }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 
-body[data-mode="practice"] .only-test,
-body[data-mode="practice"] .not-practice,
-body[data-mode="test"] .only-practice,
-body[data-mode="free"] .only-practice,
-body[data-mode="free"] .only-test { display: none; }
+/* Each mode shows only the elements that list it in data-modes. */
+body[data-mode="practice"] [data-modes]:not([data-modes~="practice"]),
+body[data-mode="test"] [data-modes]:not([data-modes~="test"]),
+body[data-mode="focus"] [data-modes]:not([data-modes~="focus"]),
+body[data-mode="free"] [data-modes]:not([data-modes~="free"]) { display: none; }
 body[data-mode="free"] #scope { height: 340px; }
 body[data-mode="free"] .chips, body[data-mode="free"] .hint { visibility: hidden; }
 body[data-mode="free"] .hint { display: none; }
 
 /* ---- stage ---- */
 .modes { margin-bottom: 14px; }
-.modes button { flex: 1; padding: 8px 10px; font-size: 13px; min-height: 36px; }
+.modes button { flex: 1; padding: 8px 4px; font-size: 13px; min-height: 36px; }
 
 /* The practice "lamp": nothing to read, just a colour. */
 .lamp {
@@ -106,6 +106,11 @@ body[data-mode="free"] .hint { display: none; }
 .pnote.focus { border-color: var(--info); }
 .pnote.focus i { color: var(--info); }
 .pnote.home b::after { content: " ⌂"; color: var(--muted); font-weight: 400; }
+button.pnote { appearance: none; font: inherit; color: var(--text); text-align: left; cursor: pointer; }
+button.pnote:hover { border-color: #3d4a5c; }
+.focus-controls { margin-bottom: 14px; }
+.focus-sum { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+.focus-sum b { color: var(--text); font-family: var(--mono); }
 .stage-top { display: flex; align-items: center; gap: 8px; min-height: 26px; }
 .spacer { flex: 1; }
 .badge {

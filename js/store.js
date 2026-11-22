@@ -5,10 +5,13 @@ import { NOTE_NAMES, pc, noteName, degreeLabel } from './music.js';
 const KEY_SETTINGS = 'pitchmatch.settings.v1';
 const KEY_LOG = 'pitchmatch.log.v1';
 const KEY_PRACTICE = 'pitchmatch.practice.v1';
+const KEY_FOCUS = 'pitchmatch.focus.v1';
 const MAX_LOG = 3000;
 
 export const DEFAULTS = {
-  mode: 'practice', // practice | test | free (analyzer only)
+  mode: 'practice', // practice | test | focus | free (analyzer only)
+  focusNote: null, // focus mode's note (MIDI); null = start from the practice home note
+  focusRotate: true, // focus mode: a different instrument every rep
   rangePreset: 'baritone',
   low: 43,
   high: 64,
@@ -57,6 +60,12 @@ export function loadPractice() {
   return p && p.v === 1 && p.notes && Array.isArray(p.order) ? p : null;
 }
 export const savePractice = (p) => write(KEY_PRACTICE, p);
+/** Focus results: { [midi]: { [sound id]: { n, clean } } } */
+export function loadFocus() {
+  const f = read(KEY_FOCUS);
+  return f && typeof f === 'object' && !Array.isArray(f) ? f : {};
+}
+export const saveFocus = (f) => write(KEY_FOCUS, f);
 
 /**
  * A record: { ts, midi, key: {tonic, scale}|null, degree, result: first|second|miss,

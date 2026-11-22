@@ -1,22 +1,54 @@
 // Web Audio: the reference piano and the microphone → pitch-frame pipeline.
 //
-// Two sampled pianos, both tuned to exact pitch:
+// Reference sounds, all tuned to exact pitch and level-matched:
 //   'piano'       EarMaster's grand, one recording per key, voiced the way
 //                 EarMaster plays it (tone filter, level, clean release; voicing.js)
 //   'salamander'  Salamander grand, one recording every 3 semitones, transposed
-// 'piano' falls back to Salamander when its samples aren't bundled, and either
-// falls back to a synth if loading fails.
+//   instruments   FluidR3 GM sounds (instruments.js), one every 3 semitones
+//   'sine'        a pure tone
+// Files are fetched one at a time as they are needed and kept. 'piano' uses
+// Salamander for any key EarMaster's set lacks; anything that fails to load
+// falls back to a synth.
 
 import { PitchDetector } from './pitch.js';
 import { SAMPLES } from './samples.js';
 import { KEYS as EM_KEYS, MAKEUP as EM_MAKEUP } from './earmaster.js';
+import { INSTRUMENTS } from './instruments.js';
 import * as V from './voicing.js';
 import { midiToFreq } from './music.js';
 
 const SAMPLE_DIR = new URL('../samples/', import.meta.url);
 const EM_DIR = new URL('../samples/earmaster/', import.meta.url);
+const GM_DIR = new URL('../samples/gm/', import.meta.url);
 const EM_BY_MIDI = new Map(EM_KEYS.map((k) => [k.midi, k]));
 export const HAS_EARMASTER = EM_KEYS.length > 0;
+
+/** Sparse sample sets, transposed to the nearest sample: Salamander and the instruments. */
+const SETS = {
+  salamander: { dir: SAMPLE_DIR, samples: SAMPLES },
+  ...Object.fromEntries(INSTRUMENTS.map((i) => [i.id, { dir: new URL(`${i.dir}/`, GM_DIR), samples: i.samples }])),
+};
+
+/** Every reference sound, in menu order. */
+export const SOUNDS = [
+  { id: 'piano', name: HAS_EARMASTER ? 'Grand piano (EarMaster)' : 'Grand piano' },
+  ...(HAS_EARMASTER ? [{ id: 'salamander', name: 'Grand piano (Salamander)' }] : []),
+  ...INSTRUMENTS.map((i) => ({ id: i.id, name: i.name })),
+  { id: 'sine', name: 'Pure sine' },
+];
+export const soundName = (id) => (SOUNDS.find((s) => s.id === id) || SOUNDS[0]).name;
+
+const nearest = (samples, midi) => samples.reduce((best, s) => (Math.abs(s.midi - midi) < Math.abs(best.midi - midi) ? s : best));
+
+/** The file a sound plays for a note: { url, em } for EarMaster, { url, sample } for a sparse set, or null. */
+function source(timbre, midi) {
+  const em = timbre === 'piano' ? EM_BY_MIDI.get(midi) : null;
+  if (em) return { url: new URL(em.file, EM_DIR).href, em };
+  const set = SETS[timbre === 'piano' ? 'salamander' : timbre];
+  if (!set) return null;
+  const sample = nearest(set.samples, midi);
+  return { url: new URL(sample.file, set.dir).href, sample };
+}
 
 /**
  * Volume envelope on `g`, EarMaster style: 1 ms attack, flat through the hold,
@@ -92,9 +124,8 @@ export function outputChain(ctx, { drive = DRIVE, trim = TRIM } = {}) {
 export class AudioEngine {
   constructor() {
     this.ctx = null;
-    this.buffers = new Map(); // Salamander sample midi → AudioBuffer
-    this.emBuffers = new Map(); // EarMaster key midi → AudioBuffer
-    this.loading = new Map(); // set name → Promise
+    this.files = new Map(); // url → decoded AudioBuffer
+    this.fetching = new Map(); // url → Promise
     this.voices = new Set();
     this.bright = false; // EarMaster piano without its tone filter
   }
@@ -230,39 +261,47 @@ export class AudioEngine {
     if (this.ctx) this.ctx.close().catch(() => {});
     this.stream = null;
     this.ctx = null;
-    this.buffers.clear();
-    this.emBuffers.clear();
-    this.loading.clear();
+    this.files.clear();
+    this.fetching.clear();
     this.voices.clear();
     this.clickBuf = null;
     this.noiseBuf = null;
   }
 
-  /** Load the samples a reference sound needs (once). Resolves when they are in. */
-  useTimbre(timbre) {
-    if (timbre === 'piano' && HAS_EARMASTER) return this._load('earmaster', EM_KEYS, EM_DIR, this.emBuffers);
-    if (timbre === 'piano' || timbre === 'salamander') return this._load('salamander', SAMPLES, SAMPLE_DIR, this.buffers);
-    return Promise.resolve();
-  }
-
-  _load(name, list, dir, into) {
-    if (!this.loading.has(name)) {
+  /** Fetch and decode one file (once). Never rejects: a failed file just stays missing. */
+  _file(url) {
+    if (!this.fetching.has(url)) {
       const ctx = this.ctx;
-      const all = Promise.all(
-        list.map(async (s) => {
+      this.fetching.set(
+        url,
+        (async () => {
           try {
-            const res = await fetch(new URL(s.file, dir));
+            const res = await fetch(url);
             if (!res.ok) throw new Error(res.status);
             const buf = await ctx.decodeAudioData(await res.arrayBuffer());
-            if (this.ctx === ctx) into.set(s.midi, buf);
+            if (this.ctx === ctx) this.files.set(url, buf);
           } catch {
-            /* the next fallback covers this key */
+            /* the synth covers it */
           }
-        }),
+        })(),
       );
-      this.loading.set(name, all);
     }
-    return this.loading.get(name);
+    return this.fetching.get(url);
+  }
+
+  /** Load everything a sound needs for the whole range, C2–C6. */
+  useTimbre(timbre) {
+    const urls = new Set();
+    for (let m = 36; m <= 84; m++) {
+      const src = source(timbre, m);
+      if (src) urls.add(src.url);
+    }
+    return Promise.all([...urls].map((u) => this._file(u)));
+  }
+
+  /** Load just what one note needs in each of the given sounds. */
+  prepare(timbres, midi) {
+    return Promise.all(timbres.map((t) => source(t, midi)).filter(Boolean).map((s) => this._file(s.url)));
   }
 
   /** Schedule one note. `at` is an AudioContext time. */
@@ -273,10 +312,12 @@ export class AudioEngine {
     const sources = [];
 
     let tail = 0.6; // how long after note-off the sources keep running
-    const em = timbre === 'piano' ? EM_BY_MIDI.get(midi) : null;
-    const emBuf = em && this.emBuffers.get(midi);
-    const key = SAMPLES.reduce((best, s) => (Math.abs(s.midi - midi) < Math.abs(best.midi - midi) ? s : best));
-    const salBuf = timbre === 'piano' || timbre === 'salamander' ? this.buffers.get(key.midi) : null;
+    const src0 = source(timbre, midi);
+    const buf = src0 && this.files.get(src0.url);
+    const em = buf && src0.em;
+    const emBuf = em ? buf : null;
+    const key = buf && src0.sample;
+    const salBuf = key ? buf : null;
 
     if (emBuf) {
       // EarMaster: one recording per key, already in tune; cancel the few cents
