@@ -34,6 +34,7 @@ export const DEFAULTS = {
   timbre: 'piano', // any id in audio.js SOUNDS
   brightPiano: false, // EarMaster piano without its tone filter
   sounds: true, // result sounds, so practice works with your eyes closed
+  playback: 'miss', // play your note back, then the target: off | miss | always
   speakerFix: true, // iOS: route playback so the phone doesn't turn it down while the mic is live
   auto: true,
 };

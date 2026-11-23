@@ -266,7 +266,7 @@ a { color: var(--info); }
   body[data-mode="free"] #scope { height: 300px; }
   .lamp { height: 210px; }
   .hint kbd, .hint { font-size: 11px; }
-  .controls .btn { flex: 1 1 0; padding: 10px 8px; }
+  .controls .btn { flex: 1 1 0; padding: 10px 6px; white-space: nowrap; }
   .controls .btn.primary { flex-basis: 100%; }
   .stats { grid-template-columns: repeat(2, 1fr); }
 }

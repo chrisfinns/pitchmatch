@@ -57,6 +57,7 @@ let find = null; // live state of a "find it" round
 let cue = { kind: '', word: '', sub: '' }; // the big WAIT / SING in the middle panel
 let cleanStreak = 0;
 let soundUntil = 0;
+let lastTake = null; // your last sung note, in memory only: { samples, midi, timbre }
 
 // ---------------------------------------------------------------- flow
 
@@ -111,6 +112,7 @@ function begin() {
 
 function stop() {
   pocketEnd();
+  lastTake = null;
   engine.stop();
   round = null;
   lastFrame = null;
@@ -134,6 +136,7 @@ function newRound() {
 }
 
 function playReference(withContext) {
+  if (round.tryNo === 1 && state !== S.LISTENING) lastTake = null; // a fresh note: last one's take no longer applies
   setState(S.PLAYING);
   holdBar(false);
   engine.stopAll();
@@ -263,6 +266,9 @@ function onFrame(f) {
   } else if (ev.type === 'done') {
     holdBar(false);
     if (ev.coverage < 0.75) return unreadable();
+    // Keep the note you just sang (from just before its onset, so a scoop is audible).
+    const samples = round.kind === 'calibrate' ? null : engine.take(ev.t0 - 0.2, f.t + 0.03);
+    lastTake = samples && { samples, midi: round.midi, timbre: round.timbre || settings.timbre };
     if (round.kind === 'calibrate') setHome(ev);
     else if (round.kind === 'land') judgeLand(ev);
     else if (round.kind === 'focus') judgeFocus(ev);
@@ -361,6 +367,38 @@ function replay() {
     seq++; // holds auto-advance while you compare
     engine.playNote(round.midi, { dur: NOTE_DUR, vel: 0.85, timbre: round.timbre || settings.timbre });
   }
+}
+
+/** Your take, then the target note: an A/B you can hear. Returns when it ends (context time). */
+function playBack() {
+  if (!lastTake || !engine.running) return engine.running ? engine.now() : 0;
+  engine.stopAll();
+  const end = engine.playTake(lastTake.samples, engine.now() + 0.1);
+  engine.playNote(lastTake.midi, { at: end + 0.35, dur: NOTE_DUR, vel: 0.85, timbre: lastTake.timbre });
+  quietUntil(end + 0.35 + NOTE_DUR);
+  return end + 0.35 + NOTE_DUR;
+}
+
+/** Keep our own playback off the live pitch trace (context time). */
+function quietUntil(t) {
+  soundUntil = Math.max(soundUntil, performance.now() + (t - engine.now()) * 1000 + 300);
+}
+
+function hearMe() {
+  if (!lastTake || ![S.DONE, S.BETWEEN].includes(state)) return;
+  seq++; // hold auto-advance while you listen; Next / Try again carries on
+  renderControls();
+  playBack();
+}
+
+/** After a judged note: play it back if the setting asks, and say how long to wait before moving on. */
+function autoPlayBack(ok) {
+  if (!lastTake || settings.playback === 'off' || (ok && settings.playback !== 'always')) return 0;
+  const start = engine.now() + 0.6; // after the result sound
+  const end = engine.playTake(lastTake.samples, start);
+  engine.playNote(lastTake.midi, { at: end + 0.35, dur: NOTE_DUR, vel: 0.85, timbre: lastTake.timbre });
+  quietUntil(end + 0.35 + NOTE_DUR);
+  return (end + 0.35 + NOTE_DUR - engine.now()) * 1000;
 }
 
 function mainAction() {
@@ -504,7 +542,8 @@ function judgeLand(ev) {
   verdictSound(res, ['unlocked', 'mastered', 'complete'].includes(out.event));
   say(d.title, `${d.detail} ${tail()}`, tone === 'warn' ? 'ok' : tone);
   renderScore();
-  after(res.ok ? 1500 : 2800, practiceRound);
+  const back = autoPlayBack(res.ok);
+  after(back ? back + 900 : res.ok ? 1500 : 2800, practiceRound);
 }
 
 /** Show a verdict colour/word in the practice panel (or blank it). Clears any cue. */
@@ -616,7 +655,8 @@ function judgeFocus(ev) {
   verdictSound(res);
   say(d.title, `${d.detail} ${soundName(round.timbre)}: ${st.clean} of ${st.n} clean.`, tone === 'warn' ? 'ok' : tone);
   renderScore();
-  after(res.ok ? 1500 : 2800, focusRound);
+  const back = autoPlayBack(res.ok);
+  after(back ? back + 900 : res.ok ? 1500 : 2800, focusRound);
 }
 
 /** Jump to focus mode on a note (from the practice ladder). */
@@ -870,6 +910,7 @@ function renderControls() {
   main.disabled = ![S.IDLE, S.BETWEEN, S.DONE].includes(state);
   $('btnReplay').disabled = !(round && round.midi && [S.LISTENING, S.FINDING, S.BETWEEN, S.DONE].includes(state));
   $('btnSkip').disabled = state === S.IDLE || state === S.FREE;
+  $('btnHear').disabled = !(lastTake && [S.DONE, S.BETWEEN].includes(state));
   $('btnStop').disabled = state === S.IDLE;
 
   let badge = mode === 'free' ? 'Analyzer' : 'Ready';
@@ -1071,6 +1112,7 @@ const FIELDS = [
   ['setTimbre', 'timbre'],
   ['setBright', 'brightPiano'],
   ['setSounds', 'sounds'],
+  ['setPlayback', 'playback'],
   ['setAuto', 'auto'],
   ['setSpeakerFix', 'speakerFix'],
   ['setPocket', 'pocket'],
@@ -1173,6 +1215,7 @@ function onClick(id, fn) {
 
 onClick('btnMain', mainAction);
 onClick('btnReplay', replay);
+onClick('btnHear', hearMe);
 onClick('btnSkip', skip);
 onClick('btnStop', stop);
 onClick('btnSettings', () => toggleSettings($('settings').hidden));
@@ -1232,6 +1275,7 @@ addEventListener('keydown', (e) => {
     e.preventDefault();
     mainAction();
   } else if (e.key === 'r') replay();
+  else if (e.key === 'm') hearMe();
   else if (e.key === 's') skip();
 });
 

@@ -54,11 +54,12 @@
 
     <div class="controls">
       <button id="btnMain" class="btn primary">Start</button>
-      <button id="btnReplay" class="btn" disabled>Replay note</button>
+      <button id="btnReplay" class="btn" disabled>Replay</button>
+      <button id="btnHear" class="btn" disabled title="Your last note, then the target. Kept in memory only, never saved.">Hear me</button>
       <button id="btnSkip" class="btn" disabled>Skip</button>
       <button id="btnStop" class="btn ghost" disabled>Stop</button>
     </div>
-    <p class="hint">Use headphones if you can — the mic is unprocessed so pitch reads true. <kbd>Space</kbd> next · <kbd>R</kbd> replay · <kbd>S</kbd> skip</p>
+    <p class="hint">Use headphones if you can — the mic is unprocessed so pitch reads true. <kbd>Space</kbd> next · <kbd>R</kbd> replay · <kbd>M</kbd> hear me · <kbd>S</kbd> skip</p>
   </section>
 
   <section id="settings" class="card settings" hidden aria-label="Settings">
@@ -156,6 +157,13 @@
       <label class="check" id="rowBright"><input type="checkbox" id="setBright"> <span>Brighter piano (no tone filter)</span></label>
       <label class="check"><input type="checkbox" id="setClicks"> <span>Clicks before you sing</span></label>
       <label class="check"><input type="checkbox" id="setSounds"> <span>Result sound after you sing</span></label>
+      <label>Play my note back, then the target
+        <select id="setPlayback">
+          <option value="off">Only when I tap “Hear me”</option>
+          <option value="miss">After a miss</option>
+          <option value="always">After every note</option>
+        </select>
+      </label>
       <label class="check" id="rowSpeakerFix" hidden><input type="checkbox" id="setSpeakerFix"> <span>iPhone loud-speaker fix</span></label>
     </div>
   </section>

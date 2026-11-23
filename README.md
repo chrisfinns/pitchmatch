@@ -22,6 +22,8 @@ One note at a time, in a small range that widens as you improve.
 4. A streak of clean landings (5 by default; 3–20 in Settings) makes a note solid and unlocks the next one — nearest to home, alternating above and below. Miss a new note three times running and you go back to finding it.
 5. **Retention.** A streak right after hearing a note mostly proves short-term echo memory, so solid notes have to survive time: each one is checked cold at the start of every new day, and keeps returning as mixed review. Miss one twice and it's back in focus.
 
+**Hear yourself.** After each note, **Hear me** (or `M`) plays the note you just sang, from just before its onset so a scoop is audible, then the target: an A/B you can hear. By default it also plays automatically after a miss (Settings → Sounds: only on tap / after a miss / after every note). Only your latest note is kept, in memory: it is overwritten on the next try, dropped on Stop, and never saved or sent anywhere.
+
 **Count-in clicks** (on by default, both modes; Settings → Sounds → Clicks before you sing): after the reference note two metronome clicks play half a second apart and you come in on the next beat, so there's no guessing when the app is ready. The big panel shows WAIT until then and SING once the mic is open. The click is a few milliseconds of high-passed noise with no pitch, so it can't be read as singing.
 
 **Result sounds** (on by default, both modes; Settings → Sounds → Result sound after you sing) let you practise with your eyes closed:

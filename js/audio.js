@@ -86,6 +86,7 @@ function envelope(g, at, dur, level, hold) {
 }
 const WINDOW = 2048;
 const HOP = 512;
+const RING_SECONDS = 6; // how much mic audio is kept, in memory only, for playback
 
 /** iPhone / iPad (every browser there is WebKit). */
 export const IS_IOS =
@@ -219,6 +220,27 @@ export class AudioEngine {
       mute.gain.value = 0;
       src.connect(hp).connect(lp).connect(tap).connect(mute).connect(ctx.destination);
 
+      // A second tap on the unfiltered mic feeds a short ring buffer in memory,
+      // so the last sung note can be played back. Nothing is stored or sent
+      // anywhere; it is overwritten continuously and dropped on stop.
+      this.recRate = rate;
+      this.ring = new Float32Array(Math.round(rate * RING_SECONDS));
+      this.ringPos = 0; // total samples written
+      const rec = new AudioWorkletNode(ctx, 'pm-capture', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        processorOptions: { decim, hop: HOP },
+      });
+      src.connect(rec).connect(mute);
+      rec.port.onmessage = (e) => {
+        if (!this.ring || this.ctx !== ctx) return; // a message can land just after stop
+        const d = e.data;
+        const n = this.ring.length;
+        for (let i = 0; i < d.length; i++) this.ring[(this.ringPos + i) % n] = d[i];
+        this.ringPos += d.length;
+      };
+
       tap.port.onmessage = (e) => {
         win.copyWithin(0, HOP);
         win.set(e.data, WINDOW - HOP);
@@ -290,6 +312,53 @@ export class AudioEngine {
     this.voices.clear();
     this.clickBuf = null;
     this.noiseBuf = null;
+    this.ring = null;
+    this.ringPos = 0;
+  }
+
+  /**
+   * Copy of the mic audio between two frame times (seconds, as in onFrame's
+   * `t`), or null if it has already scrolled out of the ring.
+   */
+  take(t0, t1) {
+    if (!this.ring) return null;
+    const n = this.ring.length;
+    const i0 = Math.max(Math.round(t0 * this.recRate), this.ringPos - n, 0);
+    const i1 = Math.min(Math.round(t1 * this.recRate), this.ringPos);
+    if (i1 - i0 < this.recRate * 0.2) return null;
+    const out = new Float32Array(i1 - i0);
+    for (let i = 0; i < out.length; i++) out[i] = this.ring[(i0 + i) % n];
+    return out;
+  }
+
+  /**
+   * Play a take back at a steady level (peak-normalised, short fades) after the
+   * limiter, so it is never squashed or clipped. Returns when it ends.
+   */
+  playTake(samples, at = this.now() + 0.05, peakDb = -9) {
+    const ctx = this.ctx;
+    const buf = ctx.createBuffer(1, samples.length, this.recRate);
+    const d = buf.getChannelData(0);
+    let peak = 1e-4;
+    for (let i = 0; i < samples.length; i++) peak = Math.max(peak, Math.abs(samples[i]));
+    const g = Math.min(10 ** (peakDb / 20) / peak, 30); // don't blow up a near-silent take
+    const fade = Math.round(this.recRate * 0.012);
+    for (let i = 0; i < samples.length; i++) {
+      const edge = Math.min(1, i / fade, (samples.length - 1 - i) / fade);
+      d[i] = samples[i] * g * edge;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const out = ctx.createGain();
+    src.connect(out).connect(this.side);
+    const voice = { out, sources: [src] };
+    this.voices.add(voice);
+    src.onended = () => {
+      out.disconnect();
+      this.voices.delete(voice);
+    };
+    src.start(at);
+    return at + buf.duration;
   }
 
   /** Master volume, 0–100. Applies at once, with a short glide so it doesn't click. */
